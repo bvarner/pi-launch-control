@@ -15,6 +15,7 @@ import (
 
 type IgniterState struct {
 	ready	bool
+	firing	bool
 	when	time.Time
 	igniter	Igniter		`json:"-"`
 }
@@ -27,13 +28,30 @@ var igniter *Igniter
 
 
 
-func HandleIgniter(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		istate := IgniterState {
-			(igniter.testPin.Read() == gpio.Low),
-			time.Now(),
-			*igniter,
+func IgniterControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		if (igniter.firePin.Read() == gpio.Low) {
+			// TODO: Fire until the test pin is high, or up to a 1 second pulse.
+			igniter.firePin.Out(gpio.Low)
+
+			igniter.firePin.Out(gpio.High)
+			time.Sleep(250 * time.Millisecond)
+			igniter.firePin.Out(gpio.Low)
+
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusConflict)
 		}
+	}
+
+	istate := IgniterState {
+		(igniter.testPin.Read() == gpio.Low),
+		(igniter.firePin.Read() == gpio.High),
+		time.Now(),
+		*igniter,
+	}
+
+	if r.Method == "GET" || r.Method == "POST" {
 		json.NewEncoder(w).Encode(istate)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -55,7 +73,7 @@ func main() {
 		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
 	})
 
-	http.HandleFunc("/igniter", HandleIgniter)
+	http.HandleFunc("/igniter", IgniterControl)
 
 	log.Fatal(http.ListenAndServe(":80", nil));
 }
