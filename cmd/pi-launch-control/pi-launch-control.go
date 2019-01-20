@@ -14,15 +14,15 @@ import (
 )
 
 type IgniterState struct {
-	ready	bool
-	firing	bool
-	when	time.Time
-	igniter	Igniter		`json:"-"`
+	Ready	bool
+	Firing	bool
+	When	time.Time
+	igniter	Igniter
 }
 
 type Igniter struct {
-	testPin 	gpio.PinIO
-	firePin		gpio.PinIO
+	TestPin 	gpio.PinIO
+	FirePin		gpio.PinIO
 }
 var igniter *Igniter
 
@@ -30,13 +30,13 @@ var igniter *Igniter
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		if (igniter.firePin.Read() == gpio.Low) {
+		if (igniter.FirePin.Read() == gpio.Low) {
 			// TODO: Fire until the test pin is high, or up to a 1 second pulse.
-			igniter.firePin.Out(gpio.Low)
+			igniter.FirePin.Out(gpio.Low)
 
-			igniter.firePin.Out(gpio.High)
+			igniter.FirePin.Out(gpio.High)
 			time.Sleep(250 * time.Millisecond)
-			igniter.firePin.Out(gpio.Low)
+			igniter.FirePin.Out(gpio.Low)
 
 			w.WriteHeader(http.StatusOK)
 		} else {
@@ -45,8 +45,8 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	istate := IgniterState {
-		(igniter.testPin.Read() == gpio.Low),
-		(igniter.firePin.Read() == gpio.High),
+		(igniter.TestPin.Read() == gpio.Low),
+		(igniter.FirePin.Read() == gpio.High),
 		time.Now(),
 		*igniter,
 	}
@@ -65,8 +65,8 @@ func main() {
 	}
 
 	igniter = &Igniter {
-		testPin: gpioreg.ByName("GPIO17"),
-		firePin: gpioreg.ByName("GPIO27"),
+		TestPin: gpioreg.ByName("GPIO17"),
+		FirePin: gpioreg.ByName("GPIO27"),
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r * http.Request) {
