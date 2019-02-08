@@ -17,6 +17,7 @@ type IgniterState struct {
 	Ready	bool
 	Firing	bool
 	When	time.Time
+
 	igniter	Igniter
 }
 
@@ -28,19 +29,27 @@ var igniter *Igniter
 
 
 
+
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
+	var pulse = 0 * time.Nanosecond;
+
 	if r.Method == "POST" {
-		if (igniter.FirePin.Read() == gpio.Low) {
-			// TODO: Fire until the test pin is high, or up to a 1 second pulse.
+		for (igniter.TestPin.Read() == gpio.Low && pulse < 1 * time.Second) {
+			pulse += 250 * time.Millisecond;
+
 			igniter.FirePin.Out(gpio.Low)
 
 			igniter.FirePin.Out(gpio.High)
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(pulse)
 			igniter.FirePin.Out(gpio.Low)
+		}
 
-			w.WriteHeader(http.StatusOK)
-		} else {
+		if (pulse.Nanoseconds() == 0){
 			w.WriteHeader(http.StatusConflict)
+		} else if (pulse.Seconds() >= 1) {
+			w.WriteHeader(http.StatusExpectationFailed)
+		} else {
+			w.WriteHeader(http.StatusOK)
 		}
 	}
 
@@ -59,6 +68,10 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// TODO: HX711 IIO Scale Driver Interactions.
+
+// TODO: Camera Interactions.
+
 func main() {
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
@@ -74,6 +87,8 @@ func main() {
 	})
 
 	http.HandleFunc("/igniter", IgniterControl)
+
+
 
 	log.Fatal(http.ListenAndServe(":80", nil));
 }
