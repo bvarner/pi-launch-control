@@ -3,14 +3,21 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dhowden/raspicam"
 	"html"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"periph.io/x/periph/conn/gpio/gpioreg"
 	"periph.io/x/periph/host"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"periph.io/x/periph/conn/gpio"
-	"periph.io/x/periph/conn/gpio/gpioreg"
 )
 
 type IgniterState struct {
@@ -21,6 +28,7 @@ type IgniterState struct {
 	igniter	Igniter
 }
 
+/* How we communicate with the Igniter */
 type Igniter struct {
 	TestPin 	gpio.PinIO
 	FirePin		gpio.PinIO
@@ -28,6 +36,300 @@ type Igniter struct {
 var igniter *Igniter
 
 
+
+
+type KnownWeight struct {
+	Actual		int
+	Measured    int
+}
+
+/* Scale Settings */
+type Scale struct {
+	sync.Mutex
+
+	Device		string
+	Trigger		string
+
+	iIODevice	string
+	devDevice	string
+	idx_time	int
+	idx_voltage	int
+
+	Initialized	bool
+
+	Calibrated 	bool
+	ZeroOffset  int
+	Measured	[]KnownWeight
+}
+var scale *Scale
+
+func NewScale(dev string, triggerDev string) (*Scale, error) {
+	var err error = nil
+
+	s := new(Scale)
+	s.Device = dev
+	s.Trigger = triggerDev
+
+	// Test to make sure the scale device exist.
+	if _, err := os.Stat(dev); err != nil {
+		return nil, err
+	}
+
+	files, err := ioutil.ReadDir(dev)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), "iio:device") {
+			s.iIODevice = dev + "/" + f.Name();
+			s.Device = "/dev/" + f.Name();
+			break;
+		}
+	}
+
+
+	// If the sysfs trigger doesn't exist, then we try to create one.
+	if _, err := os.Stat(triggerDev); err != nil {
+
+		// Make sure we have the proper sysfs bits.
+		if _, err := os.Stat("/sys/bus/iio/devices/iio_sysfs_trigger"); err != nil {
+			fmt.Println("Sysfs Triggering Unavilable.", err)
+			return s, err
+		}
+
+		// Create trigger0 if it doesn't exist.
+		if _, err := os.Stat("/sys/bus/iio/devices/iio_sysfs_trigger/trigger0"); err != nil {
+			// Create trigger0 since it does not exist
+			if err := DeviceEcho("/sys/bus/iio/devices/iio_sysfs_trigger/add_trigger", []byte("0"), 0200); err != nil {
+				return s, err
+			}
+		}
+	}
+
+	// By the time we get here we know we have sysfstrigger0
+	triggerName, err := ioutil.ReadFile("/sys/bus/iio/devices/iio_sysfs_trigger/trigger0/name")
+
+	// Set the trigger as the iio:device trigger.
+	if err := DeviceEcho(s.iIODevice + "/trigger/current_trigger", triggerName, 0644); err != nil {
+		return s, err
+	}
+
+	// Get the timestamp and the voltage0
+	DeviceEcho(s.iIODevice + "/scan_elements/in_timestamp_en", []byte("1"), 0644)
+	DeviceEcho(s.iIODevice + "/scan_elements/in_voltage0_en", []byte("1"), 0644)
+
+	// Enable the buffer.
+	DeviceEcho(s.iIODevice + "/buffer/enable", []byte("1"), 0644)
+
+	// Find out what index the items are.
+	buf, err := ioutil.ReadFile(s.iIODevice + "/scan_elements/in_timestamp_index")
+	if err != nil {
+		return s, err
+	}
+	s.idx_time, err = strconv.Atoi(string(buf))
+
+	buf, err = ioutil.ReadFile(s.iIODevice + "/scan_elements/in_voltage0_index")
+	if err != nil {
+		return s, err
+	}
+	s.idx_voltage, err = strconv.Atoi(string(buf))
+
+	s.ZeroOffset = -1
+	s.Measured = make([]KnownWeight, 0, 5)
+
+	err = s.Tare()
+	s.Initialized = err == nil
+
+	return s, err
+}
+
+
+
+func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(filename, os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	n, err := f.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
+}
+
+
+
+
+
+func (s Scale) Tare() error {
+	var err error = nil
+	s.Lock()
+
+	// Unset calibration data.
+	s.Calibrated = false;
+	// Always set the first known weight to the scale's tare
+	s.ZeroOffset, err = s.Sample(1 * time.Second)
+	s.Measured[0] =  KnownWeight {
+			Actual: 0,
+			Measured: s.ZeroOffset,
+	}
+
+	s.Unlock()
+
+	return err
+}
+
+
+func (s Scale) Sample(duration time.Duration) (int, error) {
+	var err error = nil;
+	ret := 0
+
+	var trigger = sync.NewCond(&s)
+	var wg sync.WaitGroup
+	var start = false;
+	var stop = false;
+
+	wg.Add(3)
+
+	// Trigger thread
+	go func() {
+		// Notify when done.
+		defer wg.Done()
+
+		// Wait for it...
+		trigger.L.Lock()
+		for (start == false) {
+			trigger.Wait()
+		}
+		trigger.L.Unlock()
+
+		// Go.
+		for stop != true {
+			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
+
+			// TODO: write to the trigger file like a fiend.
+
+		}
+	}()
+
+	// Read Thread
+	go func() {
+		// Notify when done
+		defer wg.Done()
+
+		// TODO: Open the device file for reading
+		// Wait for it...
+		trigger.L.Lock()
+		for start == false {
+			trigger.Wait()
+		}
+		trigger.L.Unlock()
+
+		// TODO: Read bytes into the buffer.
+
+	}()
+
+	// Timer thread
+	go func() {
+		// Notify when done.
+		defer wg.Done()
+
+		// Wait for it...
+		trigger.L.Lock()
+		for start == false {
+			trigger.Wait()
+		}
+		trigger.L.Unlock()
+
+		// Go.
+		time.Sleep(duration)
+
+		stop = true;
+	}()
+
+	// Kick em' off.
+	start = true
+	trigger.Broadcast()
+
+	// Wait for it...
+	wg.Wait()
+
+	// TODO: Parse the buffer, and compute a reasonable value
+
+	return ret, err
+}
+
+
+/* Video Camera Settings  */
+var videoProfile *raspicam.Vid
+var cameraProfile *raspicam.Still
+
+
+
+
+
+
+
+
+
+func CameraControl(w http.ResponseWriter, r *http.Request) {
+	//TODO: Setup the raspicam.vid
+	raspicam.NewVid()
+}
+
+func TestControl(w http.ResponseWriter, r *http.Request) {
+	// TODO: Ensure scale calibration.
+
+	// Spawn thread for triggering scale data collection.
+
+	// Same process as launch control.
+
+	// Stop data collection.
+
+	// Return a location to the h264 stream and data log file.
+}
+
+func LaunchControl(w http.ResponseWriter, r *http.Request) {
+	// Verify Igniter State.
+	// Start Video Recording
+	// Initiate countdown.
+	// Fire Igniter.
+
+	// Wait for launch success / stop signal.
+
+	// Stop Video Recording.
+}
+
+
+
+
+func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
+	if (r.Method == "POST") {
+		json.NewDecoder(r.Body).Decode(scale);
+	}
+
+	if (r.Method == "GET" || r.Method == "POST") {
+		json.NewEncoder(w).Encode(scale)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"));
+	}
+}
+
+
+func TareScaleControl(w http.ResponseWriter, r *http.Request) {
+	if (r.Method == "GET" || r.Method == "POST") {
+		scale.Tare()
+		json.NewEncoder(w).Encode(scale)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"));
+	}
+}
 
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
@@ -68,27 +370,49 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TODO: HX711 IIO Scale Driver Interactions.
-
-// TODO: Camera Interactions.
-
 func main() {
-	if _, err := host.Init(); err != nil {
+	var err error = nil
+	if _, err = host.Init(); err != nil {
 		log.Fatal(err)
 	}
 
+	// Initialize the Igniter.
 	igniter = &Igniter {
 		TestPin: gpioreg.ByName("GPIO17"),
 		FirePin: gpioreg.ByName("GPIO27"),
 	}
 
+	// Initialize the Scale.
+	scaleDevice := "/sys/devices/platform/0.weight"
+	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0/"
+	scale, err = NewScale(scaleDevice, scaleTrigger);
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+
+	// Initialize the Camera.
+
+
+
+
+	// Setup the handlers.
 	http.HandleFunc("/", func(w http.ResponseWriter, r * http.Request) {
 		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
 	})
 
-	http.HandleFunc("/igniter", IgniterControl)
+	http.HandleFunc("/igniter/", IgniterControl)
+	http.HandleFunc("/camera/", CameraControl)
+	http.HandleFunc("/scale", ScaleSettingsControl)
+	http.HandleFunc("/scale/tare", TareScaleControl)
+//	http.HandleFunc("/scale/calibrate/", CalibrateScaleControl)
+
+	http.HandleFunc("/testfire/", TestControl)
+	http.HandleFunc("/launch/", LaunchControl)
+
+	// TODO: Register "/" to serve a web-app.
 
 
-
-	log.Fatal(http.ListenAndServe(":80", nil));
+	log.Fatal(http.ListenAndServe(":80", nil))
 }
