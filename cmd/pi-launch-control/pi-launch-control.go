@@ -238,7 +238,7 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		}
 		defer dev.Close()
 		samp := make([]byte, 128) // Single sample
-		data := make([]byte, 128 * 80 * duration.Seconds()) // 128 bytes @ 80 samples / second.
+		data := make([]byte, cap(samp) * 80 * int(duration.Seconds())) // 128 bytes @ 80 samples / second.
 
 		// Wait for it...
 		trigger.L.Lock()
