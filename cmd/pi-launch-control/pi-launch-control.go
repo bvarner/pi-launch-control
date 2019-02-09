@@ -150,6 +150,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 
 func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(filename, os.O_WRONLY, perm)
+	defer f.Close()
 	if err != nil {
 		return err
 	}
