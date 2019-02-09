@@ -143,6 +143,8 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	err = s.Tare()
 	s.Initialized = err == nil
 
+	fmt.Println("Scale Initialized.")
+
 	return s, err
 }
 
@@ -448,9 +450,7 @@ func main() {
 
 	// Initialize the Camera.
 
-
-
-
+	fmt.Println("Setting up HTTP server...")
 	// Setup the handlers.
 	http.HandleFunc("/", func(w http.ResponseWriter, r * http.Request) {
 		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
@@ -466,7 +466,6 @@ func main() {
 	http.HandleFunc("/launch/", LaunchControl)
 
 	// TODO: Register "/" to serve a web-app.
-
-
+	
 	log.Fatal(http.ListenAndServe(":80", nil))
 }
