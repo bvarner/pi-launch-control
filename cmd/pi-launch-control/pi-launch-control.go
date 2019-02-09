@@ -216,16 +216,20 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		t := bytes.NewBufferString("1").Bytes()
 
 		// Wait for it...
+		fmt.Println("trigger thread waiting...")
 		trigger.L.Lock()
 		for (start == false) {
 			trigger.Wait()
 		}
 		trigger.L.Unlock()
 
+		fmt.Println("trigger thread go")
+
 		// Go.
 		for stop != true {
-			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
+			fmt.Println("trigger")
 			triggerf.Write(t);
+			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
 		}
 	}()
 
@@ -244,16 +248,20 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		data := make([]byte, cap(samp) * 80 * int(duration.Seconds())) // 128 bytes @ 80 samples / second.
 
 		// Wait for it...
+		fmt.Println("read thread waiting...")
 		trigger.L.Lock()
 		for start == false {
 			trigger.Wait()
 		}
 		trigger.L.Unlock()
 
+		fmt.Println("read thread go")
+
 		i := 0
 		// TODO: Read bytes into the buffer.
 		for stop != true {
 			i++
+			fmt.Println(fmt.Sprintf("%d", i))
 			n, err := dev.Read(samp)
 
 			fmt.Println(fmt.Sprintf("read %i bytes", n))
@@ -284,23 +292,29 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		// Notify when done.
 		defer wg.Done()
 
+
+		fmt.Println("timer thread waiting...")
 		// Wait for it...
 		trigger.L.Lock()
 		for start == false {
 			trigger.Wait()
 		}
 		trigger.L.Unlock()
+		fmt.Println("timer thread go")
 
 		// Go.
 		time.Sleep(duration)
 
+		fmt.Println("Done sleeping.")
 		stop = true;
 	}()
 
+	fmt.Println("Starting Sample Threads...")
 	// Kick em' off.
 	start = true
 	trigger.Broadcast()
 
+	fmt.Println("Waiting for threads to finish.")
 	// Wait for it...
 	wg.Wait()
 
@@ -466,6 +480,6 @@ func main() {
 	http.HandleFunc("/launch/", LaunchControl)
 
 	// TODO: Register "/" to serve a web-app.
-	
+
 	log.Fatal(http.ListenAndServe(":80", nil))
 }
