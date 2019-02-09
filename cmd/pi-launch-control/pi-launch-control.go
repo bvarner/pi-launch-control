@@ -205,7 +205,7 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 
 		// Setup sync writing
 		triggerf, err := os.OpenFile(s.Trigger + "/trigger_now", os.O_WRONLY | os.O_SYNC, 0)
-		if err == nil {
+		if err != nil {
 			fmt.Println("Unable to open trigger_now", err)
 			return
 		}
