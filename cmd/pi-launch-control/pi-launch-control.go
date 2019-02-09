@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/dhowden/raspicam"
@@ -108,7 +110,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	}
 
 	// By the time we get here we know we have sysfstrigger0
-	triggerName, err := ioutil.ReadFile("/sys/bus/iio/devices/iio_sysfs_trigger/trigger0/name")
+	triggerName, err := ioutil.ReadFile(triggerDev + "/name")
 
 	// Set the trigger as the iio:device trigger.
 	if err := DeviceEcho(s.iIODevice + "/trigger/current_trigger", triggerName, 0644); err != nil {
@@ -195,10 +197,20 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 
 	wg.Add(3)
 
+
 	// Trigger thread
 	go func() {
 		// Notify when done.
 		defer wg.Done()
+
+		// Setup sync writing
+		triggerf, err := os.OpenFile(s.Trigger + "/trigger_now", os.O_WRONLY | os.O_SYNC, 0)
+		if err == nil {
+			fmt.Println("Unable to open trigger_now", err)
+			return
+		}
+		defer triggerf.Close()
+		t := bytes.NewBufferString("1").Bytes()
 
 		// Wait for it...
 		trigger.L.Lock()
@@ -210,9 +222,7 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		// Go.
 		for stop != true {
 			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
-
-			// TODO: write to the trigger file like a fiend.
-
+			triggerf.Write(t);
 		}
 	}()
 
@@ -221,7 +231,15 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		// Notify when done
 		defer wg.Done()
 
-		// TODO: Open the device file for reading
+		dev, err := os.Open(s.devDevice)
+		if err == nil {
+			fmt.Println("Unable to open device to read.", err)
+			return
+		}
+		defer dev.Close()
+		samp := make([]byte, 128) // Single sample
+		data := make([]byte, 128 * 80 * duration.Seconds()) // 128 bytes @ 80 samples / second.
+
 		// Wait for it...
 		trigger.L.Lock()
 		for start == false {
@@ -229,8 +247,33 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		}
 		trigger.L.Unlock()
 
+		i := 0
 		// TODO: Read bytes into the buffer.
+		for stop != true {
+			i++
+			n, err := dev.Read(samp)
 
+			fmt.Println(fmt.Sprintf("read %i bytes", n))
+			fmt.Println(hex.EncodeToString(samp[:n]))
+
+			if err != nil {
+				if err == io.EOF {
+					break;
+				}
+				fmt.Println(err)
+				return
+			}
+			// move the slice
+			data = data[i * cap(samp):]
+			// Copy the data
+			copy(data, samp)
+		}
+
+		// Get the full view.
+		data = data[:]
+
+		// TODO: Send the data back in a channel?
+		fmt.Println(hex.EncodeToString(data))
 	}()
 
 	// Timer thread
@@ -308,11 +351,21 @@ func LaunchControl(w http.ResponseWriter, r *http.Request) {
 
 
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
-	if (r.Method == "POST") {
-		json.NewDecoder(r.Body).Decode(scale);
+	if r.Method == "POST" {
+		var nscale *Scale
+		json.NewDecoder(r.Body).Decode(nscale);
+
+		nscale, err := NewScale(nscale.Device, nscale.Trigger);
+		if err != nil {
+			fmt.Println("Error updating scale.", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("500 - Internal Server Error"))
+			return
+		}
+		scale = nscale
 	}
 
-	if (r.Method == "GET" || r.Method == "POST") {
+	if r.Method == "GET" || r.Method == "POST" {
 		json.NewEncoder(w).Encode(scale)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -322,7 +375,7 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 
 
 func TareScaleControl(w http.ResponseWriter, r *http.Request) {
-	if (r.Method == "GET" || r.Method == "POST") {
+	if r.Method == "GET" || r.Method == "POST" {
 		scale.Tare()
 		json.NewEncoder(w).Encode(scale)
 	} else {
@@ -336,7 +389,7 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	var pulse = 0 * time.Nanosecond;
 
 	if r.Method == "POST" {
-		for (igniter.TestPin.Read() == gpio.Low && pulse < 1 * time.Second) {
+		for igniter.TestPin.Read() == gpio.Low && pulse < 1 * time.Second {
 			pulse += 250 * time.Millisecond;
 
 			igniter.FirePin.Out(gpio.Low)
@@ -346,9 +399,9 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 			igniter.FirePin.Out(gpio.Low)
 		}
 
-		if (pulse.Nanoseconds() == 0){
+		if pulse.Nanoseconds() == 0 {
 			w.WriteHeader(http.StatusConflict)
-		} else if (pulse.Seconds() >= 1) {
+		} else if pulse.Seconds() >= 1 {
 			w.WriteHeader(http.StatusExpectationFailed)
 		} else {
 			w.WriteHeader(http.StatusOK)
@@ -356,8 +409,8 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	istate := IgniterState {
-		(igniter.TestPin.Read() == gpio.Low),
-		(igniter.FirePin.Read() == gpio.High),
+		igniter.TestPin.Read() == gpio.Low,
+		igniter.FirePin.Read() == gpio.High,
 		time.Now(),
 		*igniter,
 	}
@@ -384,7 +437,7 @@ func main() {
 
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
-	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0/"
+	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0"
 	scale, err = NewScale(scaleDevice, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
