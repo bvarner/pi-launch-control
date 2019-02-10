@@ -138,7 +138,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	s.idx_voltage, err = strconv.Atoi(string(buf))
 
 	s.ZeroOffset = -1
-	s.Measured = make([]KnownWeight, 0, 5)
+	s.Measured = make([]KnownWeight, 1, 5)
 
 	err = s.Tare()
 	s.Initialized = err == nil
