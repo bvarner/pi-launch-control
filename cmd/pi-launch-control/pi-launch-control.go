@@ -235,6 +235,8 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 			return
 		}
 		defer dev.Close()
+		dev.SetReadDeadline(time.Time{})
+
 		samp := make([]byte, 128) // Single sample
 		data := make([]byte, cap(samp) * 80 * int(duration.Seconds())) // 128 bytes @ 80 samples / second.
 
