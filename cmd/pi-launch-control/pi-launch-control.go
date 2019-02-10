@@ -309,8 +309,10 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		stop = true;
 	}()
 
-	fmt.Println("Starting Sample Threads...")
 	// Kick em' off.
+	time.Sleep(500 * time.Millisecond)
+
+	fmt.Println("Starting Sample Threads...")
 	start = true
 	trigger.Broadcast()
 
