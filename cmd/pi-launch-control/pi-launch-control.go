@@ -193,12 +193,10 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 	var err error = nil;
 	ret := 0
 
-	var trigger = sync.NewCond(&s)
 	var wg sync.WaitGroup
-	var start = false;
 	var stop = false;
 
-	wg.Add(3)
+	wg.Add(2)
 
 
 	// Trigger thread
@@ -215,14 +213,6 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		defer triggerf.Close()
 		t := bytes.NewBufferString("1").Bytes()
 
-		// Wait for it...
-		fmt.Println("trigger thread waiting...")
-		trigger.L.Lock()
-		for (start == false) {
-			trigger.Wait()
-		}
-		trigger.L.Unlock()
-
 		fmt.Println("trigger thread go")
 
 		// Go.
@@ -231,6 +221,7 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 			triggerf.Write(t);
 			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
 		}
+		fmt.Println("trigger thread done")
 	}()
 
 	// Read Thread
@@ -246,14 +237,6 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		defer dev.Close()
 		samp := make([]byte, 128) // Single sample
 		data := make([]byte, cap(samp) * 80 * int(duration.Seconds())) // 128 bytes @ 80 samples / second.
-
-		// Wait for it...
-		fmt.Println("read thread waiting...")
-		trigger.L.Lock()
-		for start == false {
-			trigger.Wait()
-		}
-		trigger.L.Unlock()
 
 		fmt.Println("read thread go")
 
@@ -287,39 +270,14 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		fmt.Println(hex.EncodeToString(data))
 	}()
 
-	// Timer thread
-	go func() {
-		// Notify when done.
-		defer wg.Done()
-
-
-		fmt.Println("timer thread waiting...")
-		// Wait for it...
-		trigger.L.Lock()
-		for start == false {
-			trigger.Wait()
-		}
-		trigger.L.Unlock()
-		fmt.Println("timer thread go")
-
-		// Go.
-		time.Sleep(duration)
-
-		fmt.Println("Done sleeping.")
-		stop = true;
-	}()
-
-	// Kick em' off.
-	time.Sleep(500 * time.Millisecond)
-
-	fmt.Println("Starting Sample Threads...")
-	start = true
-	trigger.Broadcast()
-
+	// Go.
+	time.Sleep(duration)
 	fmt.Println("Waiting for threads to finish.")
+	stop = true;
 	// Wait for it...
 	wg.Wait()
 
+	fmt.Println("Sample done.")
 	// TODO: Parse the buffer, and compute a reasonable value
 
 	return ret, err
