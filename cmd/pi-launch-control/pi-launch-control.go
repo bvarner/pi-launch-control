@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/dhowden/raspicam"
@@ -39,12 +39,6 @@ var igniter *Igniter
 
 
 
-
-type KnownWeight struct {
-	Actual		int
-	Measured    int
-}
-
 /* Scale Settings */
 type Scale struct {
 	sync.Mutex
@@ -61,7 +55,7 @@ type Scale struct {
 
 	Calibrated 	bool
 	ZeroOffset  int
-	Measured	[]KnownWeight
+	Measured	map[int]int
 }
 var scale *Scale
 
@@ -85,7 +79,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	for _, f := range files {
 		if strings.HasPrefix(f.Name(), "iio:device") {
 			s.iIODevice = dev + "/" + f.Name();
-			s.Device = "/dev/" + f.Name();
+			s.devDevice = "/dev/" + f.Name();
 			break;
 		}
 	}
@@ -121,9 +115,6 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	DeviceEcho(s.iIODevice + "/scan_elements/in_timestamp_en", []byte("1"), 0644)
 	DeviceEcho(s.iIODevice + "/scan_elements/in_voltage0_en", []byte("1"), 0644)
 
-	// Enable the buffer.
-	DeviceEcho(s.iIODevice + "/buffer/enable", []byte("1"), 0644)
-
 	// Find out what index the items are.
 	buf, err := ioutil.ReadFile(s.iIODevice + "/scan_elements/in_timestamp_index")
 	if err != nil {
@@ -138,7 +129,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	s.idx_voltage, err = strconv.Atoi(string(buf))
 
 	s.ZeroOffset = -1
-	s.Measured = make([]KnownWeight, 1, 5)
+	s.Measured = make(map[int]int)
 
 	err = s.Tare()
 	s.Initialized = err == nil
@@ -170,7 +161,7 @@ func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
 
 
 
-func (s Scale) Tare() error {
+func (s *Scale) Tare() (error) {
 	var err error = nil
 	s.Lock()
 
@@ -178,26 +169,52 @@ func (s Scale) Tare() error {
 	s.Calibrated = false;
 	// Always set the first known weight to the scale's tare
 	s.ZeroOffset, err = s.Sample(1 * time.Second)
-	s.Measured[0] =  KnownWeight {
-			Actual: 0,
-			Measured: s.ZeroOffset,
-	}
+	s.Measured = make(map[int]int)
+	s.Measured[0] = s.ZeroOffset
 
 	s.Unlock()
 
 	return err
 }
 
+func (s *Scale) Calibrate(mass int) (error) {
+	var err error = nil
+	s.Lock()
 
-func (s Scale) Sample(duration time.Duration) (int, error) {
+	val, err := s.Sample(3 * time.Second);
+
+	if err == nil {
+		s.Measured[mass] = val
+	}
+
+	s.Calibrated = len(s.Measured) > 1
+	s.Unlock()
+
+	return err
+}
+
+
+func (s *Scale) Sample(duration time.Duration) (int, error) {
 	var err error = nil;
 	ret := 0
 
 	var wg sync.WaitGroup
 	var stop = false;
 
-	wg.Add(2)
+	DeviceEcho(s.iIODevice + "/buffer/enable", []byte("1"), 0)
+	defer DeviceEcho(s.iIODevice + "/buffer/enable", []byte("0"), 0)
 
+	dev, err := os.Open(s.devDevice)
+	if err != nil {
+		fmt.Println("Unable to open device to read.", err)
+		return ret, err
+	}
+	defer dev.Close()
+
+	data := make([]byte, 16 * 80) // 128 bits @ 80 samples / second.
+	data = data[:0]
+
+	wg.Add(2)
 
 	// Trigger thread
 	go func() {
@@ -213,15 +230,13 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		defer triggerf.Close()
 		t := bytes.NewBufferString("1").Bytes()
 
-		fmt.Println("trigger thread go")
-
 		// Go.
 		for stop != true {
-			fmt.Println("trigger")
-			triggerf.Write(t);
-			time.Sleep(12500 * time.Microsecond) // 12500 = 80hz
+			triggerf.Write(t)
+			time.Sleep(12300 * time.Microsecond / 2) // 12500 = 80hz
 		}
-		fmt.Println("trigger thread done")
+		// Force the device closed, unblocking any pending Read().
+		dev.Close()
 	}()
 
 	// Read Thread
@@ -229,60 +244,67 @@ func (s Scale) Sample(duration time.Duration) (int, error) {
 		// Notify when done
 		defer wg.Done()
 
-		dev, err := os.Open(s.devDevice)
-		if err == nil {
-			fmt.Println("Unable to open device to read.", err)
-			return
-		}
-		defer dev.Close()
-		dev.SetReadDeadline(time.Time{})
+		samp := make([]byte, 16) // Single sample
 
-		samp := make([]byte, 128) // Single sample
-		data := make([]byte, cap(samp) * 80 * int(duration.Seconds())) // 128 bytes @ 80 samples / second.
-
-		fmt.Println("read thread go")
-
-		i := 0
-		// TODO: Read bytes into the buffer.
 		for stop != true {
-			i++
-			fmt.Println(fmt.Sprintf("%d", i))
-			n, err := dev.Read(samp)
-
-			fmt.Println(fmt.Sprintf("read %i bytes", n))
-			fmt.Println(hex.EncodeToString(samp[:n]))
-
-			if err != nil {
-				if err == io.EOF {
-					break;
-				}
-				fmt.Println(err)
-				return
+			// These block. Hence, the forced dev.Close() Above.
+			n, _ := dev.Read(samp)
+			if n > 0 {
+				data = append(data, samp[0:n]...)
 			}
-			// move the slice
-			data = data[i * cap(samp):]
-			// Copy the data
-			copy(data, samp)
 		}
-
-		// Get the full view.
-		data = data[:]
-
-		// TODO: Send the data back in a channel?
-		fmt.Println(hex.EncodeToString(data))
 	}()
 
 	// Go.
 	time.Sleep(duration)
-	fmt.Println("Waiting for threads to finish.")
 	stop = true;
-	// Wait for it...
+
 	wg.Wait()
 
-	fmt.Println("Sample done.")
-	// TODO: Parse the buffer, and compute a reasonable value
+	// Data now contains a whole slew of samples.
+	// Reset the slice.
+	data = data[0:]
+
+	// sample data is 16 bytes (128 bits) per sample.
+	// voltage0 makes up 32 bits, 24bits are physically important.
+	// voltate1 makes up the next 32 bits. again, 24 bits are physically important. (we ignore these bytes)
+	// timestamp makes up the next 64 bits, which should be the unix time the sample was taken, in nanos?
+	var off int
+
+	nsamples := len(data) / 16
+
+	// Setup slices for storing values.
+	volts0 := make([]uint32, nsamples)
+	volts0 = volts0[:0]
+	var volt0sum uint32 = 0
+
+	volts1 := make([]uint32, nsamples)
+	volts1 = volts1[:0]
+	var volt1sum uint32 = 0
+
+	timestamps := make([]int64, nsamples)
+	timestamps = timestamps[:0]
+
+	for i := 0; i < nsamples; i++ {
+		off = i * 16
+
+		volts0 = append(volts0, binary.LittleEndian.Uint32(data[off + 0 : off + 0 + 4]))
+		volt0sum += volts0[i]
+		volts1 = append(volts1, binary.LittleEndian.Uint32(data[off + 4 : off + 4 + 4]))
+		volt1sum += volts1[i]
+		timestamps = append(timestamps, tsConvert(data[off + 8 : off + 8 + 8]))
+//		fmt.Println(fmt.Sprintf("%s @ Volts0: %d, Volts1: %d", time.Unix(0, timestamps[i]), volts0[i], volts1[i]))
+	}
+	ret = int(volt0sum) / nsamples;
 
 	return ret, err
+}
+
+// Returns a int64 from an 8 byte buffer
+func tsConvert(b []byte) int64 {
+	_ = b[7] // bounds check hint to compiler; see golang.org/issue/14808
+	return int64(b[0]) | int64(b[1])<<8 | int64(b[2])<<16 | int64(b[3])<<24 |
+		int64(b[4])<<32 | int64(b[5])<<40 | int64(b[6])<<48 | int64(b[7])<<56
 }
 
 
@@ -364,6 +386,24 @@ func TareScaleControl(w http.ResponseWriter, r *http.Request) {
 }
 
 
+func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" || r.Method == "POST" {
+		keys, ok := r.URL.Query()["mass"]
+		if ok {
+			mass, err := strconv.Atoi(keys[0])
+			if err == nil {
+				scale.Calibrate(mass)
+				json.NewEncoder(w).Encode(scale)
+			}
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	w.Write([]byte("500 - Method Not Supported"));
+}
+
+
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	var pulse = 0 * time.Nanosecond;
 
@@ -434,9 +474,9 @@ func main() {
 
 	http.HandleFunc("/igniter/", IgniterControl)
 	http.HandleFunc("/camera/", CameraControl)
-	http.HandleFunc("/scale", ScaleSettingsControl)
-	http.HandleFunc("/scale/tare", TareScaleControl)
-//	http.HandleFunc("/scale/calibrate/", CalibrateScaleControl)
+	http.HandleFunc("/scale/", ScaleSettingsControl)
+	http.HandleFunc("/scale/tare/", TareScaleControl)
+	http.HandleFunc("/scale/calibrate/", CalibrateScaleControl)
 
 	http.HandleFunc("/testfire/", TestControl)
 	http.HandleFunc("/launch/", LaunchControl)
