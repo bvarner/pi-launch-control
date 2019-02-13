@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/dhowden/raspicam"
 	"html"
@@ -133,8 +134,6 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 
 	err = s.Tare()
 	s.Initialized = err == nil
-
-	fmt.Println("Scale Initialized.")
 
 	return s, err
 }
@@ -273,29 +272,34 @@ func (s *Scale) Sample(duration time.Duration) (int, error) {
 
 	nsamples := len(data) / 16
 
-	// Setup slices for storing values.
-	volts0 := make([]uint32, nsamples)
-	volts0 = volts0[:0]
-	var volt0sum uint32 = 0
+	if nsamples > 0 {
+		// Setup slices for storing values.
+		volts0 := make([]uint32, nsamples)
+		volts0 = volts0[:0]
+		var volt0sum uint32 = 0
 
-	volts1 := make([]uint32, nsamples)
-	volts1 = volts1[:0]
-	var volt1sum uint32 = 0
+		volts1 := make([]uint32, nsamples)
+		volts1 = volts1[:0]
+		var volt1sum uint32 = 0
 
-	timestamps := make([]int64, nsamples)
-	timestamps = timestamps[:0]
+		timestamps := make([]int64, nsamples)
+		timestamps = timestamps[:0]
 
-	for i := 0; i < nsamples; i++ {
-		off = i * 16
+		for i := 0; i < nsamples; i++ {
+			off = i * 16
 
-		volts0 = append(volts0, binary.LittleEndian.Uint32(data[off + 0 : off + 0 + 4]))
-		volt0sum += volts0[i]
-		volts1 = append(volts1, binary.LittleEndian.Uint32(data[off + 4 : off + 4 + 4]))
-		volt1sum += volts1[i]
-		timestamps = append(timestamps, tsConvert(data[off + 8 : off + 8 + 8]))
-//		fmt.Println(fmt.Sprintf("%s @ Volts0: %d, Volts1: %d", time.Unix(0, timestamps[i]), volts0[i], volts1[i]))
+			volts0 = append(volts0, binary.LittleEndian.Uint32(data[off+0:off+0+4]))
+			volt0sum += volts0[i]
+			volts1 = append(volts1, binary.LittleEndian.Uint32(data[off+4:off+4+4]))
+			volt1sum += volts1[i]
+			timestamps = append(timestamps, tsConvert(data[off+8:off+8+8]))
+			//		fmt.Println(fmt.Sprintf("%s @ Volts0: %d, Volts1: %d", time.Unix(0, timestamps[i]), volts0[i], volts1[i]))
+		}
+		ret = int(volt0sum) / nsamples;
+	} else {
+		ret = 0
+		err = errors.New("Unable to communicate with Scale")
 	}
-	ret = int(volt0sum) / nsamples;
 
 	return ret, err
 }
@@ -356,6 +360,11 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 		var nscale *Scale
 		json.NewDecoder(r.Body).Decode(nscale);
 
+		// Alllows us to force a retry of New with the previous device settings if no JSON body is supplied.
+		if nscale == nil {
+			nscale = scale
+		}
+
 		nscale, err := NewScale(nscale.Device, nscale.Trigger);
 		if err != nil {
 			fmt.Println("Error updating scale.", err)
@@ -376,18 +385,21 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 
 
 func TareScaleControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" || r.Method == "POST" {
+	if scale.Initialized && (r.Method == "GET" || r.Method == "POST") {
 		scale.Tare()
 		json.NewEncoder(w).Encode(scale)
-	} else {
+	} else if scale.Initialized {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("500 - Method Not Supported"));
+		w.Write([]byte("500 - Method Not Supported"))
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("404 - Scale Not Present"))
 	}
 }
 
 
 func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" || r.Method == "POST" {
+	if scale.Initialized && (r.Method == "GET" || r.Method == "POST") {
 		keys, ok := r.URL.Query()["mass"]
 		if ok {
 			mass, err := strconv.Atoi(keys[0])
@@ -397,10 +409,13 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	} else if scale.Initialized {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"));
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("404 - Scale Not Present"))
 	}
-
-	w.WriteHeader(http.StatusMethodNotAllowed)
-	w.Write([]byte("500 - Method Not Supported"));
 }
 
 
@@ -460,9 +475,7 @@ func main() {
 	scale, err = NewScale(scaleDevice, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
-		return
 	}
-
 
 	// Initialize the Camera.
 
@@ -472,14 +485,14 @@ func main() {
 		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
 	})
 
-	http.HandleFunc("/igniter/", IgniterControl)
-	http.HandleFunc("/camera/", CameraControl)
-	http.HandleFunc("/scale/", ScaleSettingsControl)
-	http.HandleFunc("/scale/tare/", TareScaleControl)
-	http.HandleFunc("/scale/calibrate/", CalibrateScaleControl)
+	http.HandleFunc("/igniter", IgniterControl)
+	http.HandleFunc("/camera", CameraControl)
+	http.HandleFunc("/scale", ScaleSettingsControl)
+	http.HandleFunc("/scale/tare", TareScaleControl)
+	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
 
-	http.HandleFunc("/testfire/", TestControl)
-	http.HandleFunc("/launch/", LaunchControl)
+	http.HandleFunc("/testfire", TestControl)
+	http.HandleFunc("/launch", LaunchControl)
 
 	// TODO: Register "/" to serve a web-app.
 
