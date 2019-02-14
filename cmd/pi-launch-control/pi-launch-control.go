@@ -138,8 +138,6 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	return s, err
 }
 
-
-
 func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(filename, os.O_WRONLY, perm)
 	defer f.Close()
@@ -155,10 +153,6 @@ func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
 	}
 	return err
 }
-
-
-
-
 
 func (s *Scale) Tare() (error) {
 	var err error = nil
@@ -313,20 +307,36 @@ func tsConvert(b []byte) int64 {
 
 
 /* Video Camera Settings  */
-var videoProfile *raspicam.Vid
-var cameraProfile *raspicam.Still
-
-
-
-
-
-
-
+var videoProfile = *raspicam.NewVid()
+var cameraProfile = *raspicam.NewStill()
 
 
 func CameraControl(w http.ResponseWriter, r *http.Request) {
-	//TODO: Setup the raspicam.vid
-	raspicam.NewVid()
+	if r.Method == "GET" {
+		errCh := make(chan error)
+		go func() {
+			for x := range errCh {
+				fmt.Fprintf(os.Stderr, "%v\n", x)
+			}
+		}()
+		w.Header().Add("Content-Type", "image/jpeg")
+		w.Header().Add("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".jpg\"")
+		raspicam.Capture(&cameraProfile, w, errCh)
+	}
+}
+
+func VideoControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		errCh := make(chan error)
+		go func() {
+			for x := range errCh {
+				fmt.Fprintf(os.Stderr, "%v\n", x)
+			}
+		}()
+		w.Header().Add("Content-Type", "video/h264")
+		w.Header().Add("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".h264\"")
+		raspicam.Capture(&videoProfile, w, errCh)
+	}
 }
 
 func TestControl(w http.ResponseWriter, r *http.Request) {
@@ -478,6 +488,13 @@ func main() {
 	}
 
 	// Initialize the Camera.
+	cameraProfile.Timeout = 1 * time.Second;
+
+	videoProfile.Timeout = 30 * time.Second;
+	videoProfile.Width = 640
+	videoProfile.Height = 480
+	videoProfile.Framerate = 80
+	videoProfile.Args = append(videoProfile.Args, "-ae", "10,0xff,0x808000", "-a", "1548", "-a", "\"%Y-%m-%d %X\"", "-pf", "high", "-ih", "-pts")
 
 	fmt.Println("Setting up HTTP server...")
 	// Setup the handlers.
@@ -487,6 +504,7 @@ func main() {
 
 	http.HandleFunc("/igniter", IgniterControl)
 	http.HandleFunc("/camera", CameraControl)
+	http.HandleFunc("/camera/video", VideoControl)
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
