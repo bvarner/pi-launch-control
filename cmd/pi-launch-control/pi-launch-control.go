@@ -27,8 +27,6 @@ type IgniterState struct {
 	Ready	bool
 	Firing	bool
 	When	time.Time
-
-	igniter	Igniter
 }
 
 /* How we communicate with the Igniter */
@@ -59,6 +57,14 @@ type Scale struct {
 	Measured	map[int]int
 }
 var scale *Scale
+
+func NewIgniterState(i *Igniter) *IgniterState {
+	return &IgniterState{
+		igniter.IsReady(),
+		igniter.IsFiring(),
+		time.Now(),
+	}
+}
 
 func NewScale(dev string, triggerDev string) (*Scale, error) {
 	var err error = nil
@@ -352,6 +358,7 @@ func TestControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func LaunchControl(w http.ResponseWriter, r *http.Request) {
+
 	// Verify Igniter State.
 	// Start Video Recording
 	// Initiate countdown.
@@ -429,38 +436,51 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 }
 
 
+func (i *Igniter) IsReady() (bool) {
+	return i.TestPin.Read() == gpio.Low
+}
+
+func (i *Igniter) IsFiring() bool {
+	return i.FirePin.Read() == gpio.High
+}
+
+func (i *Igniter) Fire() (error) {
+	var pulse= 0 * time.Nanosecond
+	// Pulse up to 1 second.
+	if (i.IsReady() && pulse < 1*time.Second) {
+		pulse += 250 * time.Nanosecond
+
+		igniter.FirePin.Out(gpio.Low)
+
+		igniter.FirePin.Out(gpio.High)
+		time.Sleep(pulse)
+		igniter.FirePin.Out(gpio.Low)
+	}
+
+	if (pulse.Nanoseconds() == 0) {
+		// Never fired.
+		return errors.New("Igniter Not Ready.")
+	} else if (pulse.Seconds() >= 1) {
+		return errors.New("Igniter Failed to Burn Through.")
+	}
+	return nil
+}
+
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
-	var pulse = 0 * time.Nanosecond;
-
+	var err error = nil
 	if r.Method == "POST" {
-		for igniter.TestPin.Read() == gpio.Low && pulse < 1 * time.Second {
-			pulse += 250 * time.Millisecond;
+		err = igniter.Fire();
 
-			igniter.FirePin.Out(gpio.Low)
-
-			igniter.FirePin.Out(gpio.High)
-			time.Sleep(pulse)
-			igniter.FirePin.Out(gpio.Low)
-		}
-
-		if pulse.Nanoseconds() == 0 {
-			w.WriteHeader(http.StatusConflict)
-		} else if pulse.Seconds() >= 1 {
+		if err != nil {
 			w.WriteHeader(http.StatusExpectationFailed)
+			w.Write([]byte(err.Error() + "\n"))
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
 	}
 
-	istate := IgniterState {
-		igniter.TestPin.Read() == gpio.Low,
-		igniter.FirePin.Read() == gpio.High,
-		time.Now(),
-		*igniter,
-	}
-
 	if r.Method == "GET" || r.Method == "POST" {
-		json.NewEncoder(w).Encode(istate)
+		json.NewEncoder(w).Encode(NewIgniterState(igniter))
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"))
@@ -488,7 +508,9 @@ func main() {
 	}
 
 	// Initialize the Camera.
-	cameraProfile.Timeout = 1 * time.Second;
+	cameraProfile.Width = 640
+	cameraProfile.Height = 480
+	cameraProfile.Timeout = 300 * time.Millisecond;
 
 	videoProfile.Timeout = 30 * time.Second;
 	videoProfile.Width = 640
