@@ -77,44 +77,63 @@ func LaunchControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if igniter.IsReady() || force {
-		duration := strconv.Itoa(int(videoProfile.Timeout.Seconds()))
 		// Push the Camera and data feed file.
 		p, ok := w.(http.Pusher)
 		if ok {
-			p.Push("/camera/video?duration=" + duration, nil)
+			p.Push("/camera/video", nil)
 			if scale.Initialized && scale.Calibrated {
-				p.Push("/scale/capture?duration="+duration, nil)
+				p.Push("/scale/capture", nil)
+			}
+			if force {
+				p.Push(fmt.Sprintf("/igniter/countdown?force=%t", force), nil)
+			} else {
+				p.Push("/igniter/countdown", nil)
 			}
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		// TODO: Return the document that forces a browser to get the resources...
 
-		flusher, ok := w.(http.Flusher)
-		if ok {
-			i := 5
-			for i > 0 {
-				w.Write([]byte(fmt.Sprintf("%x", i)))
-				flusher.Flush();
-				time.Sleep(1 * time.Second)
-				i--
-			}
-		} else {
-			// Wait 5 Seconds, Fire.
-			time.Sleep(5 * time.Second)
-		}
 
-		w.Write([]byte("Fire"))
-		err := igniter.Fire(force)
-		if err != nil {
-			w.Write([]byte(err.Error()));
-			return
-		}
+
 	} else if (!force) {
 		w.Write([]byte("Igniter not ready."));
 	}
 	return
+}
+
+func IgniterCountdownControl(w http.ResponseWriter, r *http.Request) {
+	force := false
+	keys, ok := r.URL.Query()["force"]
+	if ok {
+		force = len(keys) > 0
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if ok {
+		i := 5
+		for i > 0 {
+			w.Write([]byte(fmt.Sprintf("%x", i)))
+			flusher.Flush();
+			time.Sleep(1 * time.Second)
+			i--
+		}
+		w.Write([]byte("Fire"))
+		flusher.Flush()
+	} else {
+		// Wait 5 Seconds, Fire.
+		time.Sleep(5 * time.Second)
+	}
+
+	w.Write([]byte("Fire"))
+	err := igniter.Fire(force)
+	if err != nil {
+		w.Write([]byte(err.Error()));
+		return
+	}
 }
 
 
@@ -185,14 +204,6 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
 		dur := int(videoProfile.Timeout.Seconds())
-
-		keys, ok := r.URL.Query()["duration"]
-		if ok {
-			d, err := strconv.Atoi(keys[0])
-			if err == nil {
-				dur = d
-			}
-		}
 
 		cap, err := scale.Sample(time.Second * time.Duration(dur))
 		if err == nil {
@@ -276,6 +287,7 @@ func main() {
 	})
 
 	http.HandleFunc("/igniter", IgniterControl)
+	http.HandleFunc("/igniter/countdown", IgniterCountdownControl)
 	http.HandleFunc("/camera", CameraControl)
 	http.HandleFunc("/camera/video", VideoControl)
 	http.HandleFunc("/scale", ScaleSettingsControl)
