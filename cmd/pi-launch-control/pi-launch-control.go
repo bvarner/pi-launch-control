@@ -286,8 +286,8 @@ func main() {
 	http.HandleFunc("/testfire", TestControl)
 	http.HandleFunc("/launch", LaunchControl)
 
-	cert := flag.String("cert", "cert.pem", "The certificate for this server.")
-	certkey := flag.String("key", "key.pem", "The key for the server cert.")
+	cert := flag.String("cert", "/etc/ssl/certs/pi-launch-control.pem", "The certificate for this server.")
+	certkey := flag.String("key", "/etc/ssl/certs/pi-launch-control-key.pem", "The key for the server cert.")
 
 	flag.Parse()
 
