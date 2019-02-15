@@ -58,6 +58,19 @@ type Scale struct {
 }
 var scale *Scale
 
+type ScaleCapture struct {
+	ZeroOffset  int
+	Measured	map[int]int
+
+	Capture		[]Sample
+}
+
+type Sample struct {
+	Timestamp	int64
+	Volt0		uint32
+	Volt1		uint32
+}
+
 func NewIgniterState(i *Igniter) *IgniterState {
 	return &IgniterState{
 		igniter.IsReady(),
@@ -114,7 +127,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	triggerName, err := ioutil.ReadFile(triggerDev + "/name")
 
 	// Set the trigger as the iio:device trigger.
-	if err := DeviceEcho(s.iIODevice + "/trigger/current_trigger", triggerName, 0644); err != nil {
+	if err := DeviceEcho(s.iIODevice + "/trigger/current_trigger", triggerName, 0); err != nil {
 		return s, err
 	}
 
@@ -144,6 +157,8 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	return s, err
 }
 
+
+
 func DeviceEcho(filename string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(filename, os.O_WRONLY, perm)
 	defer f.Close()
@@ -167,7 +182,7 @@ func (s *Scale) Tare() (error) {
 	// Unset calibration data.
 	s.Calibrated = false;
 	// Always set the first known weight to the scale's tare
-	s.ZeroOffset, err = s.Sample(1 * time.Second)
+	s.ZeroOffset, err = s.SampleAvg(1 * time.Second)
 	s.Measured = make(map[int]int)
 	s.Measured[0] = s.ZeroOffset
 
@@ -180,7 +195,7 @@ func (s *Scale) Calibrate(mass int) (error) {
 	var err error = nil
 	s.Lock()
 
-	val, err := s.Sample(3 * time.Second);
+	val, err := s.SampleAvg(3 * time.Second);
 
 	if err == nil {
 		s.Measured[mass] = val
@@ -192,10 +207,32 @@ func (s *Scale) Calibrate(mass int) (error) {
 	return err
 }
 
+func (s *Scale) Sample(duration time.Duration) (*ScaleCapture, error) {
+	timestamps, volts0, volts1, err := s.sample(duration)
 
-func (s *Scale) Sample(duration time.Duration) (int, error) {
+	if err != nil {
+		return nil, err;
+	}
+	i := 0
+	samples := make([]Sample, len(timestamps))
+	for i < len(timestamps) {
+		samples[i] = Sample {
+			timestamps[i],
+			volts0 [i],
+			volts1[i],
+		}
+		i++
+	}
+
+	return &ScaleCapture {
+		ZeroOffset: s.ZeroOffset,
+		Measured: s.Measured,
+		Capture: samples,
+	}, nil
+}
+
+func (s *Scale) sample(duration time.Duration) ([]int64, []uint32, []uint32, error) {
 	var err error = nil;
-	ret := 0
 
 	var wg sync.WaitGroup
 	var stop = false;
@@ -206,11 +243,11 @@ func (s *Scale) Sample(duration time.Duration) (int, error) {
 	dev, err := os.Open(s.devDevice)
 	if err != nil {
 		fmt.Println("Unable to open device to read.", err)
-		return ret, err
+		return nil, nil, nil, err
 	}
 	defer dev.Close()
 
-	data := make([]byte, 16 * 80) // 128 bits @ 80 samples / second.
+	data := make([]byte, 16 * 80 * (int(duration.Seconds() + 1))) // 128 bits @ 80 samples / second.
 	data = data[:0]
 
 	wg.Add(2)
@@ -276,11 +313,9 @@ func (s *Scale) Sample(duration time.Duration) (int, error) {
 		// Setup slices for storing values.
 		volts0 := make([]uint32, nsamples)
 		volts0 = volts0[:0]
-		var volt0sum uint32 = 0
 
 		volts1 := make([]uint32, nsamples)
 		volts1 = volts1[:0]
-		var volt1sum uint32 = 0
 
 		timestamps := make([]int64, nsamples)
 		timestamps = timestamps[:0]
@@ -289,16 +324,36 @@ func (s *Scale) Sample(duration time.Duration) (int, error) {
 			off = i * 16
 
 			volts0 = append(volts0, binary.LittleEndian.Uint32(data[off+0:off+0+4]))
-			volt0sum += volts0[i]
 			volts1 = append(volts1, binary.LittleEndian.Uint32(data[off+4:off+4+4]))
-			volt1sum += volts1[i]
 			timestamps = append(timestamps, tsConvert(data[off+8:off+8+8]))
 			//		fmt.Println(fmt.Sprintf("%s @ Volts0: %d, Volts1: %d", time.Unix(0, timestamps[i]), volts0[i], volts1[i]))
 		}
-		ret = int(volt0sum) / nsamples;
+
+		return timestamps, volts0, volts1, nil
 	} else {
-		ret = 0
-		err = errors.New("Unable to communicate with Scale")
+		err = errors.New("unable to communicate with scale")
+	}
+	return nil, nil, nil, err
+}
+
+
+// Sample and return the average reading over a 3 second period.
+func (s *Scale) SampleAvg(duration time.Duration) (int, error) {
+	ret := 0;
+	timestamps, volts0, volts1, err := s.sample(duration)
+
+	if err == nil {
+		nsamples := len(timestamps)
+
+		var volt0sum uint32 = 0
+		var volt1sum uint32 = 0
+
+		for i := 0; i < nsamples; i++ {
+			volt0sum += volts0[i]
+			volt1sum += volts1[i]
+		}
+
+		ret = int(volt0sum) / nsamples;
 	}
 
 	return ret, err
@@ -346,30 +401,66 @@ func VideoControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestControl(w http.ResponseWriter, r *http.Request) {
-	// TODO: Ensure scale calibration.
+	if !scale.Initialized || !scale.Calibrated {
+		w.Write([]byte("Scale Not Initialized or Not Calibrated."))
+		w.WriteHeader(http.StatusPreconditionFailed)
+		return
+	}
 
-	// Spawn thread for triggering scale data collection.
-
-	// Same process as launch control.
-
-	// Stop data collection.
-
-	// Return a location to the h264 stream and data log file.
+	LaunchControl(w, r)
 }
 
 func LaunchControl(w http.ResponseWriter, r *http.Request) {
+	force := false
 
-	// Verify Igniter State.
-	// Start Video Recording
-	// Initiate countdown.
-	// Fire Igniter.
+	keys, ok := r.URL.Query()["force"]
+	if ok {
+		force = len(keys) > 0
+	}
+	fmt.Println("Force: %b", force)
 
-	// Wait for launch success / stop signal.
+	if igniter.IsReady() || force {
+		duration := strconv.Itoa(int(videoProfile.Timeout.Seconds()))
+		// Push the Camera and data feed file.
+		p, ok := w.(http.Pusher)
+		if ok {
+			fmt.Println("Pusher...")
+			p.Push("/camera/video?duration=" + duration, nil)
+			if scale.Initialized && scale.Calibrated {
+				p.Push("/scale/capture?duration="+duration, nil)
+			}
+		} else {
+			fmt.Println("No Pusher For You.")
+		}
 
-	// Stop Video Recording.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := w.(http.Flusher)
+		if ok {
+			i := 5
+			for i > 0 {
+				w.Write([]byte(fmt.Sprintf("%x", i)))
+				flusher.Flush();
+				time.Sleep(1 * time.Second)
+				i--
+			}
+		} else {
+			// Wait 5 Seconds, Fire.
+			time.Sleep(5 * time.Second)
+		}
+
+		err := igniter.Fire(force)
+		if err != nil {
+			w.Write([]byte(err.Error()));
+			return
+		}
+	} else if (!force) {
+		w.Write([]byte("Igniter not ready."));
+	}
+	return
 }
-
-
 
 
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
@@ -436,6 +527,36 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 }
 
 
+func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
+	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
+		dur := int(videoProfile.Timeout.Seconds())
+
+		keys, ok := r.URL.Query()["duration"]
+		if ok {
+			d, err := strconv.Atoi(keys[0])
+			if err == nil {
+				dur = d
+			}
+		}
+
+		cap, err := scale.Sample(time.Second * time.Duration(dur))
+		if err == nil {
+			json.NewEncoder(w).Encode(cap)
+			return
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+		}
+	} else if scale.Initialized && scale.Calibrated {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"));
+	} else {
+		w.WriteHeader(http.StatusPreconditionFailed)
+		w.Write([]byte("Scale not initialized or calibrated."))
+	}
+}
+
+
 func (i *Igniter) IsReady() (bool) {
 	return i.TestPin.Read() == gpio.Low
 }
@@ -444,32 +565,39 @@ func (i *Igniter) IsFiring() bool {
 	return i.FirePin.Read() == gpio.High
 }
 
-func (i *Igniter) Fire() (error) {
-	var pulse= 0 * time.Nanosecond
+func (i *Igniter) Fire(force bool) (error) {
+	var pulse time.Duration = 0
+
 	// Pulse up to 1 second.
-	if (i.IsReady() && pulse < 1*time.Second) {
-		pulse += 250 * time.Nanosecond
+	for (i.IsReady() || force) && pulse.Seconds() < 1 {
+		pulse += 250 * time.Millisecond
 
 		igniter.FirePin.Out(gpio.Low)
 
 		igniter.FirePin.Out(gpio.High)
 		time.Sleep(pulse)
 		igniter.FirePin.Out(gpio.Low)
+
+		time.Sleep(500 * time.Millisecond) // half-second between pulses.
 	}
 
-	if (pulse.Nanoseconds() == 0) {
-		// Never fired.
-		return errors.New("Igniter Not Ready.")
-	} else if (pulse.Seconds() >= 1) {
-		return errors.New("Igniter Failed to Burn Through.")
+	// Never fired, not forced.
+	if pulse == 0 {
+		return errors.New("igniter not ready")
 	}
+
+	// Did it burn through in the proper amount of time?
+	if pulse.Seconds() >= 1 && i.IsReady() {
+		return errors.New("igniter failed to burn through")
+	}
+
 	return nil
 }
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	var err error = nil
 	if r.Method == "POST" {
-		err = igniter.Fire();
+		err = igniter.Fire(false);
 
 		if err != nil {
 			w.WriteHeader(http.StatusExpectationFailed)
@@ -530,11 +658,17 @@ func main() {
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
+	http.HandleFunc("/scale/capture", CaptureScaleControl)
 
 	http.HandleFunc("/testfire", TestControl)
 	http.HandleFunc("/launch", LaunchControl)
 
-	// TODO: Register "/" to serve a web-app.
+	server := &http.Server{
+		Addr: ":80",
+		Handler: nil,
+	}
 
-	log.Fatal(http.ListenAndServe(":80", nil))
+	server.SetKeepAlivesEnabled(true)
+	server.TLSConfig = nil
+	log.Fatal(server.ListenAndServe())
 }
