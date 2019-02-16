@@ -93,8 +93,6 @@ func LaunchControl(w http.ResponseWriter, r *http.Request) {
 
 		// TODO: Return the document that forces a browser to get the resources...
 
-
-
 	} else if (!force) {
 		w.Write([]byte("Igniter not ready."));
 	}
@@ -108,9 +106,8 @@ func IgniterCountdownControl(w http.ResponseWriter, r *http.Request) {
 		force = len(keys) > 0
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "max-age=0")
 
 	flusher, ok := w.(http.Flusher)
 	if ok {
@@ -205,6 +202,8 @@ func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
 		dur := int(videoProfile.Timeout.Seconds())
 
+		// TODO: Have this return results to a channel, so we can
+		// stream them as JSON to the browser.
 		cap, err := scale.Sample(time.Second * time.Duration(dur))
 		if err == nil {
 			json.NewEncoder(w).Encode(cap)
