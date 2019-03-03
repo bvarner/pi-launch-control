@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+
+    <title>Pi Launch Control</title>
+
+
+</head>
+<body>
+
+<div class="container">
+    <div class="row">
+        <form>
+        <h1>Pi Launch Control</h1>
+        <div class="form-group">
+            <input type="text" class="form-control" id="txtMission" placeholder="Mission Name"/>
+        </div>
+        </form>
+    </div>
+
+    <div class="row align-items-start">
+        <div id="scaleCard" class="col-sm card" style="display: visible;">
+            <canvas id="scaleChart"></canvas>
+            <div class="card-body">
+                <h5 class="card-title">Scale</h5>
+
+                <input id="txtScale" type="text" class="form-control" placeholder="...reading..." readonly/>
+
+                <div class="input-group">
+                    <input id="txtScaleCalibrateMass" type="text" class="form-control" placeholder="mass (g)"/>
+                    <div class="input-group-append">
+                        <span class="input-group-btn">
+                            <button id="btnScaleCalibrate" class="btn btn-outline-success" type="button">Calibrate</button>
+                        </span>
+                    </div>
+                </div>
+                <a id="btnScaleTare" class="btn btn-outline-warning">Tare</a>
+                <a id="btnScaleRead" class="btn btn-outline-primary">Read</a>
+            </div>
+        </div>
+
+        <div class="col-lg card">
+            <img id="cameraPreview" src="./camera" class="card-img-top"/>
+            <div class="card-body">
+                <h5 class="card-title">Camera</h5>
+                <button id="btnRefreshCamera" type="button" class="btn btn-outline-primary">Refresh</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-body">
+        <div class="clearfix">
+            <button id="btnTestIgniter" type="button" class="btn btn-outline-primary">Check Igniter</button>
+            <button id="btnFire" type="button" class="btn btn-outline-danger float-right" disabled="true'">Fire</button>
+        </div>
+    </div>
+</div>
+
+<!-- Optional JavaScript -->
+<!-- jQuery first, then Popper.js, then Bootstrap JS -->
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+<script src="./moment.js"></script>
+<script src="./Chart.js"></script>
+<script>
+(function() {
+    function testIgniter() {
+        fetch('./igniter')
+            .then(function(response) {
+                if (response.status !== 200) {
+                    return;
+                }
+
+                response.json().then(function(data) {
+                    $("#btnFire").prop('disabled', !data.Ready);
+                });
+            })
+            .catch(function(err) {
+                console.log('Fetch Error :-S', err);
+            });
+    }
+
+    function getScaleStatus() {
+        fetch('./scale')
+            .then(function(response) {
+                scaleStatusResponse(response);
+            })
+            .catch(function(err) {
+                console.log('Fetch Error:', err);
+            });
+    }
+
+    function scaleStatusResponse(response) {
+        if (response.status !== 200) {
+            return;
+        }
+
+        response.json().then(function(data) {
+            // We have json.
+            if (data.Initialized) {
+                $("#scaleCard").css("display", "");
+
+                if (data.Calibrated) {
+                    getScaleSample();
+                } else {
+                    $("#txtScale").prop("value", "... please calibrate ...");
+                }
+            } else {
+                $("#scaleCard").css("display", "none");
+            }
+        });
+    }
+
+    function getScaleSample() {
+        fetch('./scale/capture?ms=10')
+            .then(function(response) {
+                if (response.status !== 200) {
+                    return;
+                }
+
+                response.json().then(function(data) {
+                    // json data
+                    console.log(data);
+
+                    $("#txtScale").val(Math.round(data.Capture[0].Volt0Mass));
+
+                });
+            })
+            .catch(function(err) {
+                console.log('Fetch Error getting scale sample:', err);
+            });
+    }
+
+    $(document).ready(function() {
+        // Setup the mission text field.
+        $("#txtMission").attr("value", moment().format());
+
+        // Action handler for the refresh button.
+        $("#btnRefreshCamera").click(function() {
+            $("#cameraPreview").attr("src", "./camera?nonce="+Date.now());
+        });
+
+        $("#btnTestIgniter").click(function() {
+            testIgniter();
+        });
+
+        $("#btnScaleRead").click(function() {
+            getScaleStatus();
+        });
+
+        $("#btnScaleTare").click(function() {
+            fetch('./scale/tare')
+                    .then(function(response) {
+                        scaleStatusResponse(response);
+                    })
+                    .catch(function(err) {
+                        console.log('failed to tare scale:', err);
+                    });
+        });
+
+        $("#btnScaleCalibrate").click(function() {
+            fetch('./scale/calibrate?mass=' + $("#txtScaleCalibrateMass").val())
+                    .then(function(response){
+                        scaleStatusResponse(response);
+                    })
+                    .catch(function(Err) {
+                        console.log('Failed to calibrate scale:', err);
+                    });
+        });
+
+        // Automatically test the igniter.
+        testIgniter();
+
+        // Update the scale status.
+        getScaleStatus();
+
+        // TODO: Update for event-streams at some point in the future and implement event streams in the backend.
+    });
+
+
+    var ctx = document.getElementById("scaleChart").getContext('2d');
+    var myChart = new Chart(ctx, {
+        type: 'line',
+        data: [12, 19, 3, 5, 2, 3],
+        options: {
+            scales: {
+                xAxes: [{
+                    type: 'time',
+                    time: {
+                        displayFormats: {
+                            millisecond: 'h:mm:ss.SSS a'
+                        }
+                    },
+                    distribution: 'linear',
+                }],
+            }
+        },
+    });
+
+})();
+</script>
+
+</body>
+</html>

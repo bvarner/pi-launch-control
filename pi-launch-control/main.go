@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/GeertJohan/go.rice"
 	"github.com/bvarner/pi-launch-control"
 	"github.com/dhowden/raspicam"
-	"html"
 	"log"
 	"net/http"
 	"os"
@@ -33,8 +33,12 @@ func CameraControl(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(os.Stderr, "%v\n", x)
 			}
 		}()
-		w.Header().Add("Content-Type", "image/jpeg")
-		w.Header().Add("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".jpg\"")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".jpg\"")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
+		w.Header().Set("Pragma", "no-cache") // HTTP 1.0.
+		w.Header().Set("Expires", "0") // Proxies.
+
 		raspicam.Capture(&cameraProfile, w, errCh)
 	}
 }
@@ -47,8 +51,8 @@ func VideoControl(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(os.Stderr, "%v\n", x)
 			}
 		}()
-		w.Header().Add("Content-Type", "video/h264")
-		w.Header().Add("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".h264\"")
+		w.Header().Set("Content-Type", "video/h264")
+		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".h264\"")
 		raspicam.Capture(&videoProfile, w, errCh)
 	}
 }
@@ -200,11 +204,22 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 
 func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
+		var err error = nil
+
+		multiplier := time.Second
 		dur := int(videoProfile.Timeout.Seconds())
+
+		keys, ok := r.URL.Query()["ms"]
+		if ok {
+			dur, err = strconv.Atoi(keys[0])
+			if err == nil {
+				multiplier = time.Millisecond
+			}
+		}
 
 		// TODO: Have this return results to a channel, so we can
 		// stream them as JSON to the browser.
-		cap, err := scale.Sample(time.Second * time.Duration(dur))
+		cap, err := scale.Sample(multiplier * time.Duration(dur))
 		if err == nil {
 			json.NewEncoder(w).Encode(cap)
 			return
@@ -281,9 +296,7 @@ func main() {
 
 	fmt.Println("Setting up HTTP server...")
 	// Setup the handlers.
-	http.HandleFunc("/", func(w http.ResponseWriter, r * http.Request) {
-		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
-	})
+	http.Handle("/", http.FileServer(rice.MustFindBox("webroot").HTTPBox()))
 
 	http.HandleFunc("/igniter", IgniterControl)
 	http.HandleFunc("/igniter/countdown", IgniterCountdownControl)

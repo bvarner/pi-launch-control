@@ -28,13 +28,16 @@ type Scale struct {
 
 	Initialized	bool
 
-	Calibrated 	bool
-	ZeroOffset  int
-	Measured	map[int]int
+	Calibrated bool
+	ZeroOffset int
+	Measured   map[int]int
+	Adjust     float64
 }
+
 type ScaleCapture struct {
 	ZeroOffset  int
 	Measured	map[int]int
+	Multiplier	float64
 
 	Capture		[]Sample
 }
@@ -42,7 +45,9 @@ type ScaleCapture struct {
 type Sample struct {
 	Timestamp	int64
 	Volt0		uint32
+	Volt0Mass	float64
 	Volt1		uint32
+	Volt1Mass	float64
 }
 
 func NewScale(dev string, triggerDev string) (*Scale, error) {
@@ -116,6 +121,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 
 	s.ZeroOffset = -1
 	s.Measured = make(map[int]int)
+	s.Adjust = 0
 
 	err = s.Tare()
 	s.Initialized = err == nil
@@ -166,6 +172,18 @@ func (s *Scale) Calibrate(mass int) (error) {
 		s.Measured[mass] = val
 	}
 
+	// Compute the adjust values for each mass.
+	var accumulated float64 = 0
+	discount := 0
+	for mass, measured := range s.Measured {
+		if mass == 0 {
+			discount++
+			continue
+		}
+		accumulated += float64(measured-s.ZeroOffset) / float64(mass)
+	}
+	s.Adjust = accumulated / float64(len(s.Measured) - discount) // Ignore values that would cause division by zero.
+
 	s.Calibrated = len(s.Measured) > 1
 	s.Unlock()
 
@@ -183,8 +201,10 @@ func (s *Scale) Sample(duration time.Duration) (*ScaleCapture, error) {
 	for i < len(timestamps) {
 		samples[i] = Sample {
 			timestamps[i],
-			volts0 [i],
+			volts0[i],
+			float64(int(volts0[i]) - s.ZeroOffset) / s.Adjust,
 			volts1[i],
+			float64(int(volts1[i]) - s.ZeroOffset) / s.Adjust,
 		}
 		i++
 	}
@@ -192,6 +212,7 @@ func (s *Scale) Sample(duration time.Duration) (*ScaleCapture, error) {
 	return &ScaleCapture {
 		ZeroOffset: s.ZeroOffset,
 		Measured: s.Measured,
+		Multiplier: s.Adjust,
 		Capture: samples,
 	}, nil
 }
