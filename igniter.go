@@ -56,8 +56,12 @@ func (i *Igniter) Fire(force bool) (error) {
 	}
 
 	// Did it burn through in the proper amount of time?
-	if pulse.Seconds() >= 1 && i.IsReady() {
-		return errors.New("igniter failed to burn through")
+	if pulse.Seconds() >= 1 {
+		if i.IsReady() {
+			return errors.New("igniter failed to burn through")
+		} else {
+			// TODO: Igniter burnt through.
+		}
 	}
 
 	return nil
