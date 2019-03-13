@@ -3,7 +3,6 @@ package pi_launch_control
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 )
@@ -40,17 +39,14 @@ func (b *Broker) Start() {
 			case s := <-b.newClients:
 				// A new client is attached and we want to start sending them Outgoing.
 				b.clients[s] = true
-				log.Println("Added new client")
 			case s := <-b.defunctClients:
 				delete(b.clients, s)
 				close(s)
-				log.Println("Removed client")
 			case msg := <-b.Outgoing:
 				// There is a new message to send.
 				for s := range b.clients {
 					s <- msg
 				}
-				//log.Printf("Broadcast message to %d clients", len(b.clients))
 			}
 		}
 	}()
@@ -75,7 +71,6 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		<- notify
 		b.defunctClients <- messageChan
-		log.Println("HTTP connection just closed.")
 	}()
 
 	// set the headers related to SSE
@@ -94,7 +89,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Wrtie to the responsewriter.
-		fmt.Fprintf(w, "id: %d\n%s\n", time.Now().UnixNano(), msg)
+		fmt.Fprintf(w, "id: %d\n%s\n", time.Now().Unix(), msg)
 		f.Flush()
 	}
 }
