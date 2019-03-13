@@ -20,6 +20,8 @@ var igniter *pi_launch_control.Igniter
 
 var scale *pi_launch_control.Scale
 
+var broker *pi_launch_control.Broker
+
 /* Video Camera Settings  */
 var videoProfile = *raspicam.NewVid()
 var cameraProfile = *raspicam.NewStill()
@@ -103,41 +105,6 @@ func LaunchControl(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func IgniterCountdownControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Cache-Control", "max-age=0")
-
-	flusher, ok := w.(http.Flusher)
-	if ok {
-		i := 5
-		for i > 0 {
-			w.Write([]byte(fmt.Sprintf("%x", i)))
-			flusher.Flush();
-			time.Sleep(1 * time.Second)
-			i--
-		}
-		w.Write([]byte("Fire"))
-		flusher.Flush()
-	} else {
-		// Wait 5 Seconds, Fire.
-		time.Sleep(5 * time.Second)
-	}
-
-	w.Write([]byte("Fire"))
-	err := igniter.Fire(force)
-	if err != nil {
-		w.Write([]byte(err.Error()));
-		return
-	}
-}
-
-
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		var nscale *pi_launch_control.Scale
@@ -204,29 +171,7 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 
 func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
-		var err error = nil
-
-		multiplier := time.Second
-		dur := int(videoProfile.Timeout.Seconds())
-
-		keys, ok := r.URL.Query()["ms"]
-		if ok {
-			dur, err = strconv.Atoi(keys[0])
-			if err == nil {
-				multiplier = time.Millisecond
-			}
-		}
-
-		// TODO: Have this return results to a channel, so we can
-		// stream them as JSON to the browser.
-		cap, err := scale.Sample(multiplier * time.Duration(dur))
-		if err == nil {
-			json.NewEncoder(w).Encode(cap)
-			return
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-		}
+		json.NewEncoder(w).Encode(scale.Capture())
 	} else if scale.Initialized && scale.Calibrated {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"));
@@ -269,11 +214,16 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Setup the SSE Broker
+	broker = pi_launch_control.NewBroker()
+	broker.Start()
+
 	// Initialize the Igniter.
 	igniter = &pi_launch_control.Igniter {
 		TestPin: gpioreg.ByName("GPIO17"),
 		FirePin: gpioreg.ByName("GPIO27"),
 	}
+	igniter.AddListener("Igniter", broker.Outgoing)
 
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
@@ -281,9 +231,12 @@ func main() {
 	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
+	} else {
+		scale.AddListener("Scale", broker.Outgoing)
+		fmt.Println("Scale Present and Tared");
 	}
 
-	// Initialize the Camera.
+	// Initialize the Camera
 	cameraProfile.Width = 640
 	cameraProfile.Height = 480
 	cameraProfile.Timeout = 300 * time.Millisecond;
@@ -294,12 +247,15 @@ func main() {
 	videoProfile.Framerate = 80
 	videoProfile.Args = append(videoProfile.Args, "-ae", "10,0xff,0x808000", "-a", "1548", "-a", "\"%Y-%m-%d %X\"", "-pf", "high", "-ih", "-pts")
 
+
+
 	fmt.Println("Setting up HTTP server...")
 	// Setup the handlers.
 	http.Handle("/", http.FileServer(rice.MustFindBox("webroot").HTTPBox()))
+	// Setup the SSE Event Handler. This comes from the 'broker'.
+	http.HandleFunc("/events", broker.ServeHTTP)
 
 	http.HandleFunc("/igniter", IgniterControl)
-	http.HandleFunc("/igniter/countdown", IgniterCountdownControl)
 	http.HandleFunc("/camera", CameraControl)
 	http.HandleFunc("/camera/video", VideoControl)
 	http.HandleFunc("/scale", ScaleSettingsControl)

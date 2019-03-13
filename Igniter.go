@@ -9,20 +9,23 @@ import (
 type IgniterState struct {
 	Ready	bool
 	Firing	bool
-	When	time.Time
+	Timestamp	int64
 }
 
 /* How we communicate with the Igniter */
 type Igniter struct {
 	TestPin 	gpio.PinIO
 	FirePin		gpio.PinIO
+	firing		bool
+
+	Emitter 				`json:"-"`
 }
 
 func (i *Igniter) GetState() *IgniterState {
 	return &IgniterState{
 		i.IsReady(),
-		i.IsFiring(),
-		time.Now(),
+		i.IsFiring() || i.firing,
+		time.Now().Unix(),
 	}
 }
 
@@ -35,6 +38,7 @@ func (i *Igniter) IsFiring() bool {
 }
 
 func (i *Igniter) Fire(force bool) (error) {
+	i.firing = true;
 	var pulse time.Duration = 0
 
 	// Pulse up to 1 second.
@@ -42,28 +46,24 @@ func (i *Igniter) Fire(force bool) (error) {
 		pulse += 250 * time.Millisecond
 
 		i.FirePin.Out(gpio.Low)
+		i.Emit(i.GetState())
 
 		i.FirePin.Out(gpio.High)
+		i.Emit(i.GetState())
+
 		time.Sleep(pulse)
 		i.FirePin.Out(gpio.Low)
+		i.Emit(i.GetState())
 
 		time.Sleep(500 * time.Millisecond) // half-second between pulses.
 	}
+	i.firing = false;
 
 	// Never fired, not forced.
 	if pulse == 0 {
 		return errors.New("igniter not ready")
 	}
 
-	// Did it burn through in the proper amount of time?
-	if pulse.Seconds() >= 1 {
-		if i.IsReady() {
-			return errors.New("igniter failed to burn through")
-		} else {
-			// TODO: Igniter burnt through.
-		}
-	}
-
+	// Event stream should be emitting the proper current state of the igniter.
 	return nil
 }
-
