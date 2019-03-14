@@ -51,6 +51,10 @@ type ScaleCapture struct {
 }
 
 type Sample struct {
+	Initialized bool
+	Calibrated  bool
+	ZeroOffset	int
+	Adjust		float64
 	Timestamp	int64
 	Volt0		uint32
 	Volt0Mass	*float64
@@ -76,6 +80,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	var err error = nil
 
 	s := new(Scale)
+	s.EmitterID = s
 	s.Device = dev
 	s.Trigger = triggerDev
 
@@ -185,6 +190,10 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	return s, err
 }
 
+func (s *Scale) eventName() string {
+	return "Scale"
+}
+
 func (s *Scale) tickerTrigger(triggerfd *os.File) {
 	for range s.triggerTic.C {
 		triggerfd.Write([]byte("1"))
@@ -248,11 +257,9 @@ func (s *Scale) Tare() {
 	// Always set the first known weight to the scale's tare
 	s.Measured = make(map[int]int)
 	s.Measured[0] = s.ZeroOffset
-
-	s.Emit(s)
 }
 
-func (s *Scale) Calibrate(mass int) (error) {
+func (s *Scale) Calibrate(mass int) error {
 	s.Lock()
 	defer s.Unlock()
 
@@ -278,7 +285,6 @@ func (s *Scale) Calibrate(mass int) (error) {
 	s.Adjust = accumulated / float64(len(s.Measured) - discount) // Ignore values that would cause division by zero.
 
 	s.Calibrated = len(s.Measured) > 1
-	s.Emit(s)
 
 	return nil
 }
@@ -320,6 +326,13 @@ func (s *Scale) Read() Sample {
 	}
 
 	samp := Sample {
+		// Scale state
+		Initialized: s.Initialized,
+		Calibrated: s.Calibrated,
+		ZeroOffset: s.ZeroOffset,
+		Adjust: s.Adjust,
+
+		// Measured Data
 		Timestamp: oldest.(Sample).Timestamp,
 		Volt0: volt0sum / uint32(s.rollingAvg.Capacity()),
 		Volt0Mass: nil,

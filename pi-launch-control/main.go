@@ -223,7 +223,8 @@ func main() {
 		TestPin: gpioreg.ByName("GPIO17"),
 		FirePin: gpioreg.ByName("GPIO27"),
 	}
-	igniter.AddListener("Igniter", broker.Outgoing)
+	igniter.EmitterID = igniter
+	igniter.AddListener(broker.Outgoing)
 
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
@@ -232,7 +233,7 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	} else {
-		scale.AddListener("Scale", broker.Outgoing)
+		scale.AddListener(broker.Outgoing)
 		fmt.Println("Scale Present and Tared");
 	}
 

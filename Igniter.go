@@ -21,6 +21,10 @@ type Igniter struct {
 	Emitter 				`json:"-"`
 }
 
+func (i *Igniter) eventName() string {
+	return "Igniter"
+}
+
 func (i *Igniter) GetState() *IgniterState {
 	return &IgniterState{
 		i.IsReady(),

@@ -5,31 +5,27 @@ import (
 	"fmt"
 )
 
-type Emitter struct {
-	// A map where the key is a channel to send data too, and the bool means nothing.
-	listeners map[string][]chan string
+type EmitterID interface {
+	eventName()	string
 }
 
-func (e *Emitter) AddListener(event string, ch chan string) {
+type Emitter struct {
+	listeners []chan string
+	EmitterID
+}
+
+func (e *Emitter) AddListener(ch chan string) {
 	if e.listeners == nil {
-		e.listeners = make(map[string][]chan string)
+		e.listeners = make([]chan string, 0)
 	}
-	if _, ok := e.listeners[event]; ok {
-		// Append
-		e.listeners[event] = append(e.listeners[event], ch)
-	} else {
-		// Create newly allocated
-		e.listeners[event] = []chan string{ch}
-	}
+	e.listeners = append(e.listeners, ch)
 }
 
 func (e *Emitter) RemoveListener(event string, ch chan string) {
-	if _, ok := e.listeners[event]; ok {
-		for i := range e.listeners[event] {
-			if e.listeners[event][i] == ch {
-				e.listeners[event] = append(e.listeners[event][:i], e.listeners[event][i + 1:]...)
-				break;
-			}
+	for i := range e.listeners {
+		if e.listeners[i] == ch {
+			e.listeners = append(e.listeners[:i], e.listeners[i + 1:]...)
+			break;
 		}
 	}
 }
@@ -37,13 +33,11 @@ func (e *Emitter) RemoveListener(event string, ch chan string) {
 func (e *Emitter) Emit(v interface{}) {
 	b, err := json.Marshal(v)
 	if err == nil {
-		for event, handlers := range e.listeners {
-			s := fmt.Sprintf("event: %s\ndata: %s\n", event, string(b))
-			for i := range handlers {
-				go func(handler chan string) {
-					handler <- s
-				}(handlers[i])
-			}
+		for _, handler := range e.listeners {
+			s := fmt.Sprintf("event: %s\ndata: %s\n", e.eventName(), string(b))
+			go func(handler chan string) {
+				handler <- s
+			}(handler)
 		}
 	} else {
 		fmt.Println("error: ", err)

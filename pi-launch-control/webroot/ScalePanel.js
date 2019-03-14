@@ -12,7 +12,7 @@ export default class ScalePanel extends HTMLElement {
 
     connectedCallback() {
         this.render();
-        this.eventSource.addEventListener('ScaleSample', e => this.onScaleSample(e))
+        this.eventSource.addEventListener('Scale', e => this.onScaleSample(e))
     }
 
     onScaleSample(evt) {
