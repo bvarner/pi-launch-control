@@ -1,6 +1,4 @@
-"use strict";
-
-
+import ScalePanel from './ScalePanel.js';
 
 class App {
     constructor() {
