@@ -17,7 +17,27 @@
             </div>
         </aside>
         <article>
-            <scale-panel></scale-panel>
+            <scale-panel>
+                <section>
+                    <div id="chart">
+                    </div>
+                    <div>
+                        <label></label>
+                    </div>
+                    <div>
+                        <button disabled>Tare</button>
+                        <button disabled>Calibrate</button>
+                    </div>
+                </section>
+            </scale-panel>
+            <modal-dialog title="Calibration">
+                <form action="#">
+                    <div>
+                        <label for="mass">Known Mass:</label>
+                        <input type="number" id="mass" />
+                    </div>
+                </form>
+            </modal-dialog>
             <!--<camera-panel></camera-panel>-->
             <!--<igniter-panel></igniter-panel>-->
         </article>

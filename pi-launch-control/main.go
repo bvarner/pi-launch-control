@@ -22,6 +22,8 @@ var scale *pi_launch_control.Scale
 
 var broker *pi_launch_control.Broker
 
+var handler http.Handler
+
 /* Video Camera Settings  */
 var videoProfile = *raspicam.NewVid()
 var cameraProfile = *raspicam.NewStill()
@@ -126,7 +128,7 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" || r.Method == "POST" {
-		json.NewEncoder(w).Encode(scale)
+		json.NewEncoder(w).Encode(scale.Read())
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"));
@@ -181,6 +183,19 @@ func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func RootHandler(w http.ResponseWriter, r *http.Request) {
+	// Push some things if we know what our request is.
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		p, ok := w.(http.Pusher)
+		if ok {
+			p.Push("/events", nil)
+			p.Push("/style.css", nil)
+			p.Push("/App.js", nil)
+		}
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	var err error = nil
@@ -251,8 +266,12 @@ func main() {
 
 
 	fmt.Println("Setting up HTTP server...")
+
+	handler = http.FileServer(rice.MustFindBox("webroot").HTTPBox())
+
 	// Setup the handlers.
-	http.Handle("/", http.FileServer(rice.MustFindBox("webroot").HTTPBox()))
+	http.HandleFunc("/", RootHandler)
+
 	// Setup the SSE Event Handler. This comes from the 'broker'.
 	http.HandleFunc("/events", broker.ServeHTTP)
 
