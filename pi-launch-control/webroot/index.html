@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
     <link rel="stylesheet" href="style.css"/>
+    <link rel="stylesheet" href="Chart.min.css"/>
 </head>
 <body>
     <main>
@@ -17,19 +18,84 @@
             </div>
         </aside>
         <article>
+            <section>
+                <canvas id='scale-chart'></canvas>
+                <script src="./moment.min.js"></script>
+                <script src="./Chart.min.js"></script>
+                <script>
+                    const ctx = document.getElementById('scale-chart');
+                    const scaleChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            datasets: [
+                                {
+                                    label: 'Raw',
+                                    lineTension: 0,
+                                    fill: false,
+                                    data: [],
+                                    yAxisID: 'y-raw',
+                                    backgroundColor: 'rgba(235, 126, 54, 1)',
+                                    borderColor: 'rgba(235, 217, 54, 1)',
+                                    pointRadius: 0,
+                                },
+                                {
+                                    label: 'Mass',
+                                    lineTension: 0,
+                                    fill: true,
+                                    data: [],
+                                    yAxisID: 'y-mass',
+                                    backgroundColor: 'rgba(54, 162, 235, 1)',
+                                    borderColor: 'rgba(54, 162, 235, 1)',
+                                }
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            animation: {
+                                duration: 0,
+                                easing: 'linear',
+                            },
+                            title: {
+                                display: true,
+                                text: 'Scale History',
+                            },
+                            scales: {
+                                xAxes: [{
+                                    type: 'time',
+                                    display: true,
+                                    distribution: 'linear',
+                                    time: {
+                                        unit: 'second',
+                                    }
+                                }],
+                                yAxes: [{
+                                    display: true,
+                                    id: 'y-raw',
+                                    type: 'linear',
+                                    position: 'right',
+                                    ticks: {
+                                        beginAtZero: true,
+                                    }
+                                }, {
+                                    display: true,
+                                    id: 'y-mass',
+                                    type: 'linear',
+                                    position: 'left',
+                                    ticks: {
+                                        suggestedMin: -10,
+                                        suggestedMax: 50,
+                                        beginAtZero: true,
+                                    }
+                                }],
+                            },
+                        },
+                    });
+                </script>
+            </section>
+
             <scale-panel>
-                <section>
-                    <div id="chart">
-                    </div>
-                    <div>
-                        <label></label>
-                    </div>
-                    <div>
-                        <button disabled>Tare</button>
-                        <button disabled>Calibrate</button>
-                    </div>
-                </section>
             </scale-panel>
+
             <modal-dialog title="Calibration">
                 <form action="#">
                     <div>
@@ -50,8 +116,6 @@
         </footer>
     </main>
 
-    <!--<script src="moment.js"></script>-->
-    <!--<script src="Chart.js"></script>-->
     <script src="App.js" type="module"></script>
 </body>
 </html>

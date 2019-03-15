@@ -9,6 +9,7 @@ export default class ScalePanel extends HTMLElement {
         this.scale = {
             Initialized: false,
             Calibrated: false,
+            Timestamp: moment(),
             Volt0: '',
             Volt0Mass: 'Please Calibrate',
             Volt1: '',
@@ -50,7 +51,23 @@ export default class ScalePanel extends HTMLElement {
     }
 
     onScaleSample(evt) {
-        this.scale = JSON.parse(evt.data);;
+        this.scale = JSON.parse(evt.data);
+        this.scale.Volt0Mass = this.scale.Volt0Mass !== null ? this.scale.Volt0Mass : 0;
+
+        const ts = moment(Math.floor(this.scale.Timestamp / 1000000));
+
+        if (scaleChart.data.datasets[0].data.length == 30) {
+            scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(1);
+        }
+        if (scaleChart.data.datasets[1].data.length == 30) {
+            scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(1);
+        }
+
+        scaleChart.data.datasets[0].data.push({x: ts, y: this.scale.Volt0});
+        scaleChart.data.datasets[1].data.push({x: ts, y: this.scale.Volt0Mass});
+
+        scaleChart.update();
+
         this.render();
     }
 
@@ -75,10 +92,11 @@ export default class ScalePanel extends HTMLElement {
         const scale = this.scale;
         const template = html`
             <section>
-                <div id="chart">
+                <div>
+                    <slot></slot>
                 </div>
                 <div>
-                    <label>${scale.Volt0}</label>
+                    <label>${scale.Volt0Mass}</label>
                 </div>
                 <div>
                     <button ?disabled=${!scale.Initialized} @click=${(e) => this.onTare(e)}>Tare</button>
