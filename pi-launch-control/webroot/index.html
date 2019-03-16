@@ -46,6 +46,7 @@
                                     yAxisID: 'y-mass',
                                     backgroundColor: 'rgba(54, 162, 235, 1)',
                                     borderColor: 'rgba(54, 162, 235, 1)',
+                                    pointRadius: 0,
                                 }
                             ],
                         },
@@ -54,10 +55,6 @@
                             animation: {
                                 duration: 0,
                                 easing: 'linear',
-                            },
-                            title: {
-                                display: true,
-                                text: 'Scale History',
                             },
                             scales: {
                                 xAxes: [{
@@ -78,6 +75,7 @@
                                     }
                                 }, {
                                     display: true,
+                                    labelString: 'mass (g)',
                                     id: 'y-mass',
                                     type: 'linear',
                                     position: 'left',

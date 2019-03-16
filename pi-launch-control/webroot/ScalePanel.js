@@ -51,20 +51,29 @@ export default class ScalePanel extends HTMLElement {
     }
 
     onScaleSample(evt) {
-        this.scale = JSON.parse(evt.data);
+        var samples = JSON.parse(evt.data);
+
+        // The scale is an array of measurements taken since the last time a measurement was taken.
+        // We average ~40 / second.
+        // so for a 30 second graph, we'd need 30 * 40, 1200 data points.
+
+        // We report the latest (tail) of the samples recieved as the current state of the scale.
+        this.scale = samples[samples.length - 1];
         this.scale.Volt0Mass = this.scale.Volt0Mass !== null ? this.scale.Volt0Mass : 0;
 
-        const ts = moment(Math.floor(this.scale.Timestamp / 1000000));
+        samples.forEach(function(sample) {
+            const ts = moment(Math.floor(sample.Timestamp / 1000000));
+            scaleChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
+            scaleChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
+        });
 
-        if (scaleChart.data.datasets[0].data.length == 30) {
-            scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(1);
+        // Shift the chart dataset.
+        if (scaleChart.data.datasets[0].data.length > 1200) {
+            scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(scaleChart.data.datasets[0].data.length - 1200);
         }
-        if (scaleChart.data.datasets[1].data.length == 30) {
-            scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(1);
+        if (scaleChart.data.datasets[1].data.length > 1200) {
+            scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(scaleChart.data.datasets[1].data.length - 1200);
         }
-
-        scaleChart.data.datasets[0].data.push({x: ts, y: this.scale.Volt0});
-        scaleChart.data.datasets[1].data.push({x: ts, y: this.scale.Volt0Mass});
 
         scaleChart.update();
 

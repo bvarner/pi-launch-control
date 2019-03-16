@@ -20,8 +20,8 @@ type Scale struct {
 	readTic    time.Ticker `json:"="`
 	Emitter    `json:"-"`
 	sync.Mutex `json:"-"`
-	rollingAvg ring.Ring	`json:"-"`
-	highCap    ring.Ring	`json:"-"`
+	samples    ring.Ring `json:"-"`
+	previousRead int64
 
 	Device		string
 	Trigger		string
@@ -42,14 +42,6 @@ type Scale struct {
 	Adjust     	float64
 }
 
-type ScaleCapture struct {
-	ZeroOffset  int
-	Measured	map[int]int
-	Adjust		float64
-
-	Capture		[]interface{}
-}
-
 type Sample struct {
 	Initialized bool
 	Calibrated  bool
@@ -63,10 +55,10 @@ type Sample struct {
 }
 
 
-func (s *Sample) CalculateMass(scale *Scale) {
-	if scale.Calibrated {
-		v0m := float64(int(s.Volt0)-scale.ZeroOffset) / scale.Adjust
-		v1m := float64(int(s.Volt1)-scale.ZeroOffset) / scale.Adjust
+func (s *Sample) CalculateMass() {
+	if s.Calibrated {
+		v0m := float64(int(s.Volt0)-s.ZeroOffset) / s.Adjust
+		v1m := float64(int(s.Volt1)-s.ZeroOffset) / s.Adjust
 
 		s.Volt0Mass = &v0m
 		s.Volt1Mass = &v1m
@@ -80,6 +72,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	var err error = nil
 
 	s := new(Scale)
+	s.previousRead = 0
 	s.EmitterID = s
 	s.Device = dev
 	s.Trigger = triggerDev
@@ -161,14 +154,13 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	}
 
 	// Attempt to open the device.
-	s.rollingAvg.SetCapacity(31) // Rolling average will push report the last 31 samples.
-	s.highCap.SetCapacity(80 * 60) // 80 samples / second & average test length
+	s.samples.SetCapacity(80 * 60) // 80 samples / second & average test length
 
 	fd, err := os.Open(s.devDevice)
 	if err != nil {
 		return s, err
 	}
-	go s.readloop(fd)
+	go s.scaleReadLoop(fd)
 
 	// Begin triggering.
 	triggerfd, err := os.OpenFile(s.Trigger + "/trigger_now", os.O_WRONLY | os.O_SYNC, 0)
@@ -180,7 +172,7 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	go s.tickerTrigger(triggerfd)
 
 	// Every second emit a value of the current rolling average
-	s.readTic = *time.NewTicker(1 * time.Second)
+	s.readTic = *time.NewTicker(250 * time.Millisecond)
 	go s.tickerRead()
 
 	// Tare it up, baby.
@@ -206,19 +198,23 @@ func (s *Scale) tickerRead() {
 	}
 }
 
-func (s *Scale) readloop(dev *os.File) {
+func (s *Scale) scaleReadLoop(dev *os.File) {
 	samp := make([]byte, 16) // Single sample
 	for {
 		n, _ := dev.Read(samp)
 		if n == 16 {
 			p := Sample {
+				Initialized: s.Initialized,
+				Calibrated: s.Calibrated,
+				ZeroOffset: s.ZeroOffset,
+				Adjust: s.Adjust,
+
 				Timestamp: tsConvert(samp[8:16]),
 				Volt0: binary.LittleEndian.Uint32(samp[0:4]),
 				Volt1: binary.LittleEndian.Uint32(samp[4:8]),
 			}
-			p.CalculateMass(s)
-			s.rollingAvg.Enqueue(p)
-			s.highCap.Enqueue(p)
+			p.CalculateMass()
+			s.samples.Enqueue(p)
 		} else {
 			fmt.Println("Read: ", n, " bytes from scale device")
 		}
@@ -245,17 +241,12 @@ func (s *Scale) Tare() {
 	s.Lock()
 	defer s.Unlock()
 
-	// Unset calibration data.
-	s.Calibrated = false;
-
 	// Reset the ring buffer.
-	s.rollingAvg.SetCapacity(s.rollingAvg.Capacity())
+	s.samples.SetCapacity(s.samples.Capacity())
 	// Get a rolling average for the Tare reading.
-	s.ZeroOffset = s.RollingAverage()
-
+	s.ZeroOffset = int(s.RollingAverage(1 * time.Millisecond).Volt0)
 
 	// Always set the first known weight to the scale's tare
-	s.Measured = make(map[int]int)
 	s.Measured[0] = s.ZeroOffset
 }
 
@@ -268,9 +259,9 @@ func (s *Scale) Calibrate(mass int) error {
 		return errors.New("scale has not been tared")
 	}
 	// Reset the ring buffer.
-	s.rollingAvg.SetCapacity(s.rollingAvg.Capacity())
+	s.samples.SetCapacity(s.samples.Capacity())
 	// Get a rolling average for the mass reading.
-	s.Measured[mass] = s.RollingAverage()
+	s.Measured[mass] = int(s.RollingAverage(750 * time.Millisecond).Volt0)
 
 	// Compute the adjust values for each mass.
 	var accumulated float64 = 0
@@ -289,39 +280,33 @@ func (s *Scale) Calibrate(mass int) error {
 	return nil
 }
 
-func (s *Scale) RollingAverage() int {
-	for s.rollingAvg.ContentSize() < s.rollingAvg.Capacity() {
-		time.Sleep(250 * time.Millisecond)
-	}
-
+func (s *Scale) RollingAverage(duration time.Duration) Sample {
 	var volt0sum uint32 = 0;
-	for _, sample := range s.rollingAvg.Values() {
-		volt0sum += sample.(Sample).Volt0
-	}
-	return int(volt0sum) / s.rollingAvg.Capacity()
-}
-
-
-func (s *Scale) Read() Sample {
-	for s.rollingAvg.ContentSize() < s.rollingAvg.Capacity() {
-		time.Sleep(250 * time.Millisecond)
-	}
-
-	// use the latest timestamp.
-	oldest := s.rollingAvg.Peek()
-
-	var volt0sum uint32 = 0
 	var volt0mass float64 = 0
 	var volt1sum uint32 = 0
 	var volt1mass float64 = 0
-	for _, sample := range s.rollingAvg.Values() {
-		volt0sum += sample.(Sample).Volt0
-		volt1sum += sample.(Sample).Volt1
-		if sample.(Sample).Volt0Mass != nil {
-			volt0mass += *sample.(Sample).Volt0Mass
-		}
-		if sample.(Sample).Volt1Mass != nil {
-			volt1mass += *sample.(Sample).Volt1Mass
+
+	start := time.Now().Add(-1 * duration).UnixNano()
+	var count uint32 = 0
+	var masscount float64 = 0
+
+
+	for count <= 30 {
+		for _, sample := range s.samples.Values() {
+			if sample.(Sample).Timestamp >= start {
+				volt0sum += sample.(Sample).Volt0
+				volt1sum += sample.(Sample).Volt1
+				if sample.(Sample).Calibrated {
+					masscount ++
+					if sample.(Sample).Volt0Mass != nil {
+						volt0mass += *sample.(Sample).Volt0Mass
+					}
+					if sample.(Sample).Volt1Mass != nil {
+						volt1mass += *sample.(Sample).Volt1Mass
+					}
+				}
+				count++
+			}
 		}
 	}
 
@@ -333,40 +318,41 @@ func (s *Scale) Read() Sample {
 		Adjust: s.Adjust,
 
 		// Measured Data
-		Timestamp: oldest.(Sample).Timestamp,
-		Volt0: volt0sum / uint32(s.rollingAvg.Capacity()),
+		Timestamp: start,
+		Volt0: volt0sum / count,
 		Volt0Mass: nil,
-		Volt1: volt1sum / uint32(s.rollingAvg.Capacity()),
+		Volt1: volt1sum / count,
 		Volt1Mass: nil,
 	}
-
 	if volt0mass > 0 {
-		v0m := volt0mass / float64(s.rollingAvg.Capacity())
+		v0m := volt0mass / masscount
 		samp.Volt0Mass = &v0m
 	}
 	if volt1mass > 0 {
-		v1m := volt1mass / float64(s.rollingAvg.Capacity())
+		v1m := volt1mass / masscount
 		samp.Volt1Mass = &v1m
 	}
 
-	s.Emit(samp)
 	return samp
 }
 
-func (s *Scale) Capture() ScaleCapture {
-	s.highCap.SetCapacity(s.highCap.Capacity());
-	for s.highCap.ContentSize() < s.highCap.Capacity() {
-		time.Sleep(500 * time.Millisecond)
+func (s *Scale) Read() Sample {
+	start := s.previousRead
+	if start == 0 {
+		start = time.Now().UnixNano()
 	}
+	end := time.Now().UnixNano()
+	unreported := make([]Sample, 0) // This should be plenty large
 
-	cap := ScaleCapture{
-		Measured: s.Measured,
-		ZeroOffset: s.ZeroOffset,
-		Adjust: s.Adjust,
-		Capture: s.highCap.Values(),
+	for _, sample := range s.samples.Values() {
+		if sample.(Sample).Timestamp >= start {
+			unreported = append(unreported, sample.(Sample))
+		}
 	}
+	s.Emit(unreported)
 
-	return cap
+	s.previousRead = end
+	return s.RollingAverage(time.Duration(end - start))
 }
 
 // Returns a int64 from an 8 byte buffer

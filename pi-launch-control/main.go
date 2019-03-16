@@ -170,19 +170,6 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
-func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
-	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
-		json.NewEncoder(w).Encode(scale.Capture())
-	} else if scale.Initialized && scale.Calibrated {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("500 - Method Not Supported"));
-	} else {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		w.Write([]byte("Scale not initialized or calibrated."))
-	}
-}
-
 func RootHandler(w http.ResponseWriter, r *http.Request) {
 	// Push some things if we know what our request is.
 	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
@@ -281,7 +268,6 @@ func main() {
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
-	http.HandleFunc("/scale/capture", CaptureScaleControl)
 
 	http.HandleFunc("/testfire", TestControl)
 	http.HandleFunc("/launch", LaunchControl)
