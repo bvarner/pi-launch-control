@@ -138,6 +138,15 @@ func RootHandler(w http.ResponseWriter, r *http.Request) {
 	handler.ServeHTTP(w, r)
 }
 
+func CameraStatusControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		json.NewEncoder(w).Encode(camera)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"))
+	}
+}
+
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
 	var err error = nil
 	if r.Method == "POST" {
@@ -230,6 +239,7 @@ func main() {
 
 	http.HandleFunc("/igniter", IgniterControl)
 	http.HandleFunc("/camera", camera.ServeHTTP)
+	http.HandleFunc("/camera/status", CameraStatusControl)
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)

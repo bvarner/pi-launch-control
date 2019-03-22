@@ -1,6 +1,6 @@
 import {html, render} from 'https://unpkg.com/lit-html?module';
 
-export default class ScalePanel extends HTMLElement {
+export default class ScaleControlPanel extends HTMLElement {
     constructor() {
         super();
 
@@ -15,15 +15,13 @@ export default class ScalePanel extends HTMLElement {
             Volt1: '',
             Volt1Maxx: 'Please Calibrate',
         };
-
-        this.eventSource = new EventSource('/events');
     }
 
     connectedCallback() {
         this.render();
 
-        // TODO: Move the EventSource up to a component that holds all these other things in a slot.
-        this.eventSource.addEventListener('Scale', evt => this.onScaleSample(evt));
+        const controlpanel = document.querySelector('control-panel');
+        controlpanel.eventSource.addEventListener('Scale', evt => this.onScaleSample(evt));
 
         const modal = document.querySelector('modal-dialog');
         const scale = this.scale;
@@ -102,9 +100,6 @@ export default class ScalePanel extends HTMLElement {
         const template = html`
             <section>
                 <div>
-                    <slot></slot>
-                </div>
-                <div>
                     <label>${scale.Volt0Mass}</label>
                 </div>
                 <div>
@@ -118,4 +113,4 @@ export default class ScalePanel extends HTMLElement {
     }
 }
 
-customElements.define("scale-panel", ScalePanel);
+customElements.define("scale-control-panel", ScaleControlPanel);

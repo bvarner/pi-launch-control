@@ -17,9 +17,9 @@
                 <!--<mission-panel></mission-panel>-->
             </div>
         </aside>
-        <article>
-            <section>
-                <canvas id='scale-chart'></canvas>
+        <control-panel style="width: 100%;">
+            <section style="display: inline-block;">
+                <canvas id='scale-chart' style="width: 640px; height: 480px;"></canvas>
                 <script src="./moment.min.js"></script>
                 <script src="./Chart.min.js"></script>
                 <script>
@@ -89,22 +89,20 @@
                         },
                     });
                 </script>
+                <scale-control-panel>
+                </scale-control-panel>
+                <modal-dialog title="Calibration">
+                    <form action="#">
+                        <div>
+                            <label for="mass">Known Mass:</label>
+                            <input type="number" id="mass" />
+                        </div>
+                    </form>
+                </modal-dialog>
             </section>
-
-            <scale-panel>
-            </scale-panel>
-
-            <modal-dialog title="Calibration">
-                <form action="#">
-                    <div>
-                        <label for="mass">Known Mass:</label>
-                        <input type="number" id="mass" />
-                    </div>
-                </form>
-            </modal-dialog>
-            <!--<camera-panel></camera-panel>-->
+            <camera-panel style="display: inline-block;"></camera-panel>
             <!--<igniter-panel></igniter-panel>-->
-        </article>
+        </control-panel>
         <footer>
             <hr/>
             <small>

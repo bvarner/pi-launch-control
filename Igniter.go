@@ -14,7 +14,7 @@ type IgniterState struct {
 
 /* How we communicate with the Igniter */
 type Igniter struct {
-	TestPin 	gpio.PinIO
+	TestPin 	gpio.PinIO	`json:"-"'`
 	FirePin		gpio.PinIO
 	firing		bool
 

@@ -89,6 +89,10 @@ func (c *Camera) frameTrigger() {
 	for range c.trigger {
 		buf, idx, err := c.device.GetFrame()
 		if err == nil {
+			// In single buffer mode we need to copy it.
+			// Otherwise, you have to make enough buffers than you can send and re-queue fast enough
+			// to not corrupt the mmaped data in the frames.
+			// With 256 buffers, there are artifacts in the 640x480 feed at 80hz.
 			frame := make([]byte, len(buf))
 			copy(frame, buf)
 			c.device.ReleaseFrame(idx)
