@@ -16,30 +16,30 @@ import (
 
 /* Scale Settings */
 type Scale struct {
-	triggerTic time.Ticker `json:"-"`
-	readTic    time.Ticker `json:"="`
-	Emitter    `json:"-"`
-	sync.Mutex `json:"-"`
-	samples    ring.Ring `json:"-"`
-	previousRead int64
+	TriggerC		<- chan time.Time `json:"-"'`
+	readTic			time.Ticker `json:"-"`
+	Emitter			`json:"-"`
+	sync.Mutex		`json:"-"`
+	samples			ring.Ring `json:"-"`
+	previousRead	int64
 
-	Device		string
-	Trigger		string
+	Device			string
+	Trigger			string
 
-	iIODevice  	string
-	devDevice  	string
-	idxTime    	int
-	idxVoltage 	int
+	iIODevice  		string
+	devDevice  		string
+	idxTime    		int
+	idxVoltage 		int
 
-	Initialized	bool
+	Initialized		bool
 
-	Calibrated 	bool
+	Calibrated 		bool
 	// Zero Offset (tare) threshold
-	ZeroOffset 	int
+	ZeroOffset 		int
 	// Known measured values.
-	Measured   	map[int]int
+	Measured   		map[int]int
 	// The adjustment scale value.
-	Adjust     	float64
+	Adjust     		float64
 }
 
 type Sample struct {
@@ -68,10 +68,11 @@ func (s *Sample) CalculateMass() {
 	}
 }
 
-func NewScale(dev string, triggerDev string) (*Scale, error) {
+func NewScale(dev string, trig <- chan time.Time, triggerDev string) (*Scale, error) {
 	var err error = nil
 
 	s := new(Scale)
+	s.TriggerC = trig
 	s.previousRead = 0
 	s.EmitterID = s
 	s.Device = dev
@@ -167,8 +168,8 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	if err != nil {
 		return s, err
 	}
+
 	// Every tick write to the trigger_now file.
-	s.triggerTic = *time.NewTicker(12500 * time.Microsecond) // 12500 = 80hz
 	go s.tickerTrigger(triggerfd)
 
 	// Every second emit a value of the current rolling average
@@ -182,12 +183,17 @@ func NewScale(dev string, triggerDev string) (*Scale, error) {
 	return s, err
 }
 
+func (s *Scale) Close() {
+	// TODO: Implement some clean-up. :-)
+	return
+}
+
 func (s *Scale) eventName() string {
 	return "Scale"
 }
 
 func (s *Scale) tickerTrigger(triggerfd *os.File) {
-	for range s.triggerTic.C {
+	for range s.TriggerC {
 		triggerfd.Write([]byte("1"))
 	}
 }

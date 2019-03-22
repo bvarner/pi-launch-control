@@ -56,7 +56,7 @@ func (b *Broker) Start() {
 func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Make sure we support Flushing.
 	f, ok := w.(http.Flusher)
-	if (!ok) {
+	if !ok {
 		http.Error(w, "Streaming unsupported: ", http.StatusInternalServerError)
 		return
 	}

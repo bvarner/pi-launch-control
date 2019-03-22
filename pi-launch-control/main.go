@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/GeertJohan/go.rice"
 	"github.com/bvarner/pi-launch-control"
-	"github.com/dhowden/raspicam"
 	"log"
 	"net/http"
 	"os"
@@ -16,50 +15,17 @@ import (
 	"time"
 )
 
+var testTrigger *time.Ticker
+
 var igniter *pi_launch_control.Igniter
 
 var scale *pi_launch_control.Scale
 
+var camera *pi_launch_control.Camera
+
 var broker *pi_launch_control.Broker
 
 var handler http.Handler
-
-/* Video Camera Settings  */
-var videoProfile = *raspicam.NewVid()
-var cameraProfile = *raspicam.NewStill()
-
-
-func CameraControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		errCh := make(chan error)
-		go func() {
-			for x := range errCh {
-				fmt.Fprintf(os.Stderr, "%v\n", x)
-			}
-		}()
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".jpg\"")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
-		w.Header().Set("Pragma", "no-cache") // HTTP 1.0.
-		w.Header().Set("Expires", "0") // Proxies.
-
-		raspicam.Capture(&cameraProfile, w, errCh)
-	}
-}
-
-func VideoControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		errCh := make(chan error)
-		go func() {
-			for x := range errCh {
-				fmt.Fprintf(os.Stderr, "%v\n", x)
-			}
-		}()
-		w.Header().Set("Content-Type", "video/h264")
-		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".h264\"")
-		raspicam.Capture(&videoProfile, w, errCh)
-	}
-}
 
 func TestControl(w http.ResponseWriter, r *http.Request) {
 	force := false
@@ -77,14 +43,9 @@ func TestControl(w http.ResponseWriter, r *http.Request) {
 	LaunchControl(w, r)
 }
 
+// TODO: Totally refactor this.
 func LaunchControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	if igniter.IsReady() || force {
+	if igniter.IsReady() {
 		// Push the Camera and data feed file.
 		p, ok := w.(http.Pusher)
 		if ok {
@@ -92,16 +53,9 @@ func LaunchControl(w http.ResponseWriter, r *http.Request) {
 			if scale.Initialized && scale.Calibrated {
 				p.Push("/scale/capture", nil)
 			}
-			if force {
-				p.Push(fmt.Sprintf("/igniter/countdown?force=%t", force), nil)
-			} else {
-				p.Push("/igniter/countdown", nil)
-			}
+			p.Push("/igniter/countdown", nil)
 		}
-
-		// TODO: Return the document that forces a browser to get the resources...
-
-	} else if (!force) {
+	} else {
 		w.Write([]byte("Igniter not ready."));
 	}
 	return
@@ -117,7 +71,7 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 			nscale = scale
 		}
 
-		nscale, err := pi_launch_control.NewScale(nscale.Device, nscale.Trigger);
+		nscale, err := pi_launch_control.NewScale(nscale.Device, nscale.TriggerC, nscale.Trigger);
 		if err != nil {
 			fmt.Println("Error updating scale.", err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -216,6 +170,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Setup the Ticker for triggering scale and image capture.
+	testTrigger := time.NewTicker(12500 * time.Microsecond) // 80hz
+//	testTrigger := time.NewTicker(25000 * time.Microsecond) // 40hz
+	// Create a channel for the scale and the camera.
+	scaleTrigC := make(chan time.Time, 1)
+	camTrigC   := make(chan time.Time, 1)
+	// Go func to send to both of them when testTrigger is fired.
+	go func() {
+		for t := range testTrigger.C {
+			scaleTrigC <- t
+			camTrigC <- t
+		}
+	}()
+
+
 	// Setup the SSE Broker
 	broker = pi_launch_control.NewBroker()
 	broker.Start()
@@ -231,26 +200,23 @@ func main() {
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
 	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0"
-	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigger);
+	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigC, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
 	} else {
 		scale.AddListener(broker.Outgoing)
 		fmt.Println("Scale Present and Tared");
+		defer scale.Close()
 	}
 
-	// Initialize the Camera
-	cameraProfile.Width = 640
-	cameraProfile.Height = 480
-	cameraProfile.Timeout = 300 * time.Millisecond;
-
-	videoProfile.Timeout = 30 * time.Second;
-	videoProfile.Width = 640
-	videoProfile.Height = 480
-	videoProfile.Framerate = 80
-	videoProfile.Args = append(videoProfile.Args, "-ae", "10,0xff,0x808000", "-a", "1548", "-a", "\"%Y-%m-%d %X\"", "-pf", "high", "-ih", "-pts")
-
-
+	// Initialize the V4L2 Camera
+	camera, err = pi_launch_control.NewCamera("/dev/video0", camTrigC)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println("Camera Present and Initialized.")
+		defer camera.Close()
+	}
 
 	fmt.Println("Setting up HTTP server...")
 
@@ -263,8 +229,7 @@ func main() {
 	http.HandleFunc("/events", broker.ServeHTTP)
 
 	http.HandleFunc("/igniter", IgniterControl)
-	http.HandleFunc("/camera", CameraControl)
-	http.HandleFunc("/camera/video", VideoControl)
+	http.HandleFunc("/camera", camera.ServeHTTP)
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
