@@ -32,19 +32,22 @@ type Scale struct {
 	idxVoltage 		int
 
 	Initialized		bool
-
 	Calibrated 		bool
+	Recording 		bool
 	// Zero Offset (tare) threshold
 	ZeroOffset 		int
 	// Known measured values.
 	Measured   		map[int]int
 	// The adjustment scale value.
 	Adjust     		float64
+
+	recordedSamples map[string]Sample
 }
 
 type Sample struct {
 	Initialized bool
 	Calibrated  bool
+	Recording   bool
 	ZeroOffset	int
 	Adjust		float64
 	Timestamp	int64
@@ -77,6 +80,7 @@ func NewScale(dev string, trig <- chan time.Time, triggerDev string) (*Scale, er
 	s.EmitterID = s
 	s.Device = dev
 	s.Trigger = triggerDev
+	s.Recording = false
 
 	// Test to make sure the scale device exist.
 	if _, err := os.Stat(dev); err != nil {
@@ -198,6 +202,14 @@ func (s *Scale) tickerTrigger(triggerfd *os.File) {
 	}
 }
 
+func (s *Scale) StartRecording() {
+	s.Recording = true
+}
+
+func (s *Scale) StopRecording() {
+	s.Recording = false
+}
+
 func (s *Scale) tickerRead() {
 	for range s.readTic.C {
 		s.Read()
@@ -221,6 +233,15 @@ func (s *Scale) scaleReadLoop(dev *os.File) {
 			}
 			p.CalculateMass()
 			s.samples.Enqueue(p)
+
+			if s.Recording {
+				fmt.Println("Recording scale data")
+				// Do this in the background so our Read() loop is _toight_
+				go func(scale *Scale, sample Sample) {
+					filename := fmt.Sprintf("%d.json", sample.Timestamp)
+					scale.recordedSamples[filename] = sample
+				}(s, p)
+			}
 		} else {
 			fmt.Println("Read: ", n, " bytes from scale device")
 		}
@@ -348,7 +369,7 @@ func (s *Scale) Read() Sample {
 		start = time.Now().UnixNano()
 	}
 	end := time.Now().UnixNano()
-	unreported := make([]Sample, 0) // This should be plenty large
+	unreported := make([]Sample, 0) // Start empty so that append does the sensible thing.
 
 	for _, sample := range s.samples.Values() {
 		if sample.(Sample).Timestamp >= start {

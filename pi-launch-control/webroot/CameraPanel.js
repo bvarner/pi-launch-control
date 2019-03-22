@@ -16,6 +16,20 @@ export default class CameraPanel extends HTMLElement {
 
         const controlpanel = document.querySelector('control-panel');
         controlpanel.eventSource.addEventListener('Camera', evt => this.onCamera());
+
+        const cameraPanel = this;
+
+        fetch('/camera/status', {
+            method: 'GET',
+            cache: 'no-cache',
+        })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(obj) {
+            cameraPanel.camera = obj;
+            cameraPanel.render();
+        });
     }
 
     onCamera(evt) {

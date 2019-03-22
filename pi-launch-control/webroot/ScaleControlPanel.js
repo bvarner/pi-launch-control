@@ -9,6 +9,7 @@ export default class ScaleControlPanel extends HTMLElement {
         this.scale = {
             Initialized: false,
             Calibrated: false,
+            Recording: false,
             Timestamp: moment(),
             Volt0: '',
             Volt0Mass: 'Please Calibrate',
@@ -56,24 +57,38 @@ export default class ScaleControlPanel extends HTMLElement {
         // so for a 30 second graph, we'd need 30 * 40, 1200 data points.
 
         // We report the latest (tail) of the samples recieved as the current state of the scale.
-        this.scale = samples[samples.length - 1];
-        this.scale.Volt0Mass = this.scale.Volt0Mass !== null ? this.scale.Volt0Mass : 0;
+        if (samples.length > 0) {
+            this.scale = samples[samples.length - 1];
+            this.scale.Volt0Mass = this.scale.Volt0Mass !== null ? this.scale.Volt0Mass : 0;
 
-        samples.forEach(function(sample) {
-            const ts = moment(Math.floor(sample.Timestamp / 1000000));
-            scaleChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
-            scaleChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
-        });
+            const scale = this.scale;
 
-        // Shift the chart dataset.
-        if (scaleChart.data.datasets[0].data.length > 1200) {
-            scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(scaleChart.data.datasets[0].data.length - 1200);
+            samples.forEach(function (sample, idx) {
+                // If we see a move from
+                if (scale.Recording == false && sample.recording == true) {
+                    scale.Recording = true;
+
+                    scaleChart.data.datasets[0].data = [];
+                    scaleChart.data.datasets[1].data = [];
+                }
+
+                const ts = moment(Math.floor(sample.Timestamp / 1000000));
+                scaleChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
+                scaleChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
+            });
+
+            // Shift the chart dataset if we're not recording
+            if (scale.Recording == false) {
+                if (scaleChart.data.datasets[0].data.length > 1200) {
+                    scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(scaleChart.data.datasets[0].data.length - 1200);
+                }
+                if (scaleChart.data.datasets[1].data.length > 1200) {
+                    scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(scaleChart.data.datasets[1].data.length - 1200);
+                }
+            }
+
+            scaleChart.update();
         }
-        if (scaleChart.data.datasets[1].data.length > 1200) {
-            scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(scaleChart.data.datasets[1].data.length - 1200);
-        }
-
-        scaleChart.update();
 
         this.render();
     }
@@ -101,6 +116,7 @@ export default class ScaleControlPanel extends HTMLElement {
             <section>
                 <div>
                     <label>${scale.Volt0Mass}</label>
+                    <label>${scale.Recording}</label>
                 </div>
                 <div>
                     <button ?disabled=${!scale.Initialized} @click=${(e) => this.onTare(e)}>Tare</button>

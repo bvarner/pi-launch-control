@@ -218,11 +218,12 @@ func main() {
 		defer scale.Close()
 	}
 
-	// Initialize the V4L2 Camera
+	// Initialize the Camera
 	camera, err = pi_launch_control.NewCamera("/dev/video0", camTrigC)
 	if err != nil {
 		fmt.Println(err)
 	} else {
+		camera.AddListener(broker.Outgoing)
 		fmt.Println("Camera Present and Initialized.")
 		defer camera.Close()
 	}
@@ -238,8 +239,10 @@ func main() {
 	http.HandleFunc("/events", broker.ServeHTTP)
 
 	http.HandleFunc("/igniter", IgniterControl)
+
 	http.HandleFunc("/camera", camera.ServeHTTP)
 	http.HandleFunc("/camera/status", CameraStatusControl)
+
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)

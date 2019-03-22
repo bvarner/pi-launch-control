@@ -8,26 +8,31 @@ import (
 )
 
 type Camera struct {
-	DeviceName	string
-	device 		*webcam.Webcam
-	pixelFormat webcam.PixelFormat
-	trigger		<-chan time.Time
-
+	Emitter			`json:"-"`
+	DeviceName		string
+	device 			*webcam.Webcam
+	pixelFormat 	webcam.PixelFormat
+	trigger			<-chan time.Time
 
 	// Map of clients. Keys = channels over which we can push direct to attached client.
 	// Values are actually just meaningless booleans.
-	clients map[chan []byte]bool
+	clients 		map[chan []byte]bool
 
 	// Channel into which new clients can be pushed.
-	newClients chan chan []byte
+	newClients 		chan chan []byte
 
 	// Channel into which disconnected clients should be pushed.
 	defunctClients chan chan []byte
 
 	// Channel into which message are pushed to be broadcast out to attached clients.
-	broadcast   chan []byte
+	broadcast   	chan []byte
 
-	Initialized bool
+	// Recorded Frames to be fetched.
+	// Filename / then byte buffer.
+	recordedFrames 	map[string][]byte
+
+	Initialized 	bool
+	Recording   	bool
 }
 
 const FORMAT_MJPG = webcam.PixelFormat((uint32(byte('M'))) | (uint32(byte('J')) << 8) | (uint32(byte('P')) << 16) | (uint32(byte('G')) << 24))
@@ -36,16 +41,19 @@ func NewCamera(dev string, trigger <- chan time.Time) (*Camera, error) {
 	var err error = nil
 
 	c := new(Camera)
+	c.EmitterID = c
 	c.trigger = trigger
 	c.DeviceName = dev
 	c.device, err = webcam.Open(dev)
 	if err != nil {
 		return nil, err
 	}
+
 	c.clients = make(map[chan []byte]bool)
 	c.newClients = make(chan (chan []byte))
 	c.defunctClients = make(chan (chan []byte))
 	c.broadcast = make(chan []byte)
+	c.recordedFrames = make(map[string][]byte)
 
 	// Detect capabilities
 	for f := range c.device.GetSupportedFormats() {
@@ -73,20 +81,42 @@ func NewCamera(dev string, trigger <- chan time.Time) (*Camera, error) {
 	go c.clientBroadcast()
 
 	c.Initialized = true;
+	c.Recording = false;
 
 	return c, err
 }
 
+func (c *Camera) eventName() string {
+	return "Camera"
+}
+
 func (c *Camera) Close() {
+	c.StopRecording()
 	c.Initialized = false
-	// TODO: Wait for condition from clientBroadcast
-	fmt.Println("Closing camera.")
 	c.device.Close()
+	c.Emit(c)
+}
+
+func (c *Camera) StartRecording() {
+	c.Recording = false
+	// Force it allow the old map to be GCed.
+	c.recordedFrames = nil
+	c.recordedFrames = make(map[string][]byte, 80 * 30) // about 35MB at 16kb per frame.
+	// Allow other threads to start stuffing things into the array.
+	c.Recording = true
+
+	c.Emit(c)
+}
+
+func (c *Camera) StopRecording() {
+	c.Recording = false
+
+	c.Emit(c)
 }
 
 func (c *Camera) frameTrigger() {
 	i := 0
-	for range c.trigger {
+	for when := range c.trigger {
 		buf, idx, err := c.device.GetFrame()
 		if err == nil {
 			// In single buffer mode we need to copy it.
@@ -102,11 +132,10 @@ func (c *Camera) frameTrigger() {
 				c.broadcast <- frame
 			}
 
-			// TODO If Recording...
-			// Save the frame to the in-memory hash with the proper filename
-			// TODO push the frame, with the proper filename.
-			// TODO Emit an event to the emitter signaling that the browser should fetch the still.
-			// Browser fetches pushed resource, world is happy.
+			if c.Recording {
+				filename := fmt.Sprintf("%d.jpg", when.UnixNano())
+				c.recordedFrames[filename] = frame
+			}
 
 			i++
 			if i == 4 { // Divisor. 80hz / 4 = 20fps for livecast.
