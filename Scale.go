@@ -2,6 +2,7 @@ package pi_launch_control
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/zfjagann/golang-ring"
@@ -221,6 +222,18 @@ func (s *Scale) StopRecording() {
 	s.Recording = false
 
 	s.Emit(s)
+}
+
+func (s *Scale) GetRecordedData() map[string][]byte {
+	s.Lock()
+	defer s.Unlock()
+
+	files := make(map[string][]byte)
+	for fname, sample := range s.recordedSamples {
+		files[fname], _ = json.Marshal(sample)
+	}
+
+	return files;
 }
 
 func (s *Scale) tickerRead() {

@@ -124,6 +124,18 @@ func (c *Camera) StopRecording() {
 	c.Emit(c)
 }
 
+func (c *Camera) GetRecordedData() map[string][]byte {
+	c.Lock()
+	defer c.Unlock()
+
+	files := make(map[string][]byte)
+	for fname, frame := range c.recordedFrames {
+		files[fname] = frame
+	}
+
+	return files
+}
+
 func (c *Camera) frameTrigger() {
 	i := 0
 	for when := range c.trigger {

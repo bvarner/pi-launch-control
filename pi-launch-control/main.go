@@ -1,11 +1,15 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
+	"compress/flate"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/GeertJohan/go.rice"
 	"github.com/bvarner/pi-launch-control"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -26,40 +30,6 @@ var camera *pi_launch_control.Camera
 var broker *pi_launch_control.Broker
 
 var handler http.Handler
-
-func TestControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	if (!scale.Initialized || !scale.Calibrated) && !force {
-		w.Write([]byte("Scale Not Initialized or Not Calibrated."))
-		w.WriteHeader(http.StatusPreconditionFailed)
-		return
-	}
-
-	LaunchControl(w, r)
-}
-
-// TODO: Totally refactor this.
-func LaunchControl(w http.ResponseWriter, r *http.Request) {
-	if igniter.IsReady() {
-		// Push the Camera and data feed file.
-		p, ok := w.(http.Pusher)
-		if ok {
-			p.Push("/camera/video", nil)
-			if scale.Initialized && scale.Calibrated {
-				p.Push("/scale/capture", nil)
-			}
-			p.Push("/igniter/countdown", nil)
-		}
-	} else {
-		w.Write([]byte("Igniter not ready."));
-	}
-	return
-}
 
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
@@ -124,6 +94,73 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+func RecordingControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		buf := new(bytes.Buffer)
+		zw := zip.NewWriter(buf)
+
+		// Register a custom Deflate compressor.
+		zw.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+			return flate.NewWriter(out, flate.BestCompression)
+		})
+
+		var err error = nil
+		filename := ""
+		// For each array from the scale and camera.
+		for _, data := range []map[string][]byte { scale.GetRecordedData(), camera.GetRecordedData() } {
+			if err != nil {
+				break;
+			}
+			for fname, fdata := range data {
+				if filename == "" {
+					filename = fmt.Sprintf("%s.zip", fname[:len(fname) - 5]) // prune `.json`
+				}
+				f, ferr := zw.Create(fname)
+				if ferr != nil {
+					err = ferr
+					break
+				}
+				_, ferr = f.Write(fdata)
+				if ferr != nil {
+					err = ferr
+					break
+				}
+			}
+		}
+
+		// Still no error?
+		if err == nil {
+			err = zw.Close()
+		}
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		if filename == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		w.Header().Add("Pragma", "public")
+		w.Header().Add("Expires", "0")
+		w.Header().Add("Cache-Control", "must-revalidate, post-check=0, pre-check=0")
+		w.Header().Add("Cache-Control", "public")
+		w.Header().Add("Content-type", "application/octet-stream")
+		w.Header().Add("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", filename))
+		w.Header().Add("Content-Transfer-Encoding", "binary")
+		w.Header().Add("Content-Length", fmt.Sprintf("%d", buf.Len()))
+		w.Write(buf.Bytes())
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"))
+	}
+}
+
+
 func RootHandler(w http.ResponseWriter, r *http.Request) {
 	// Push some things if we know what our request is.
 	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
@@ -181,7 +218,6 @@ func main() {
 
 	// Setup the Ticker for triggering scale and image capture.
 	testTrigger := time.NewTicker(12500 * time.Microsecond) // 80hz
-//	testTrigger := time.NewTicker(25000 * time.Microsecond) // 40hz
 	// Create a channel for the scale and the camera.
 	scaleTrigC := make(chan time.Time, 1)
 	camTrigC   := make(chan time.Time, 1)
@@ -247,8 +283,7 @@ func main() {
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
 
-	http.HandleFunc("/testfire", TestControl)
-	http.HandleFunc("/launch", LaunchControl)
+	http.HandleFunc("/recording", RecordingControl)
 
 	cert := flag.String("cert", "/etc/ssl/certs/pi-launch-control.pem", "The certificate for this server.")
 	certkey := flag.String("key", "/etc/ssl/certs/pi-launch-control-key.pem", "The key for the server cert.")
