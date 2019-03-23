@@ -1,6 +1,7 @@
 package pi_launch_control
 
 import (
+	"archive/zip"
 	"fmt"
 	"github.com/blackjack/webcam"
 	"net/http"
@@ -32,7 +33,7 @@ type Camera struct {
 
 	// Recorded Frames to be fetched.
 	// Filename / then byte buffer.
-	recordedFrames 	map[string][]byte
+	recordedFrames 	map[int64][]byte
 
 	Initialized 	bool
 	Recording   	bool
@@ -56,7 +57,7 @@ func NewCamera(dev string, trigger <- chan time.Time) (*Camera, error) {
 	c.newClients = make(chan (chan []byte))
 	c.defunctClients = make(chan (chan []byte))
 	c.broadcast = make(chan []byte)
-	c.recordedFrames = make(map[string][]byte)
+	c.recordedFrames = make(map[int64][]byte)
 
 	// Detect capabilities
 	for f := range c.device.GetSupportedFormats() {
@@ -109,7 +110,7 @@ func (c *Camera) StartRecording() {
 	c.Recording = false
 	// Force it allow the old map to be GCed.
 	c.recordedFrames = nil
-	c.recordedFrames = make(map[string][]byte) // about 35MB at 16kb per frame.
+	c.recordedFrames = make(map[int64][]byte) // about 35MB at 16kb per frame.
 	// Allow other threads to start stuffing things into the array.
 	c.Recording = true
 
@@ -124,13 +125,18 @@ func (c *Camera) StopRecording() {
 	c.Emit(c)
 }
 
-func (c *Camera) GetRecordedData() map[string][]byte {
+func (c *Camera) GetRecordedData() map[*zip.FileHeader][]byte {
 	c.Lock()
 	defer c.Unlock()
 
-	files := make(map[string][]byte)
-	for fname, frame := range c.recordedFrames {
-		files[fname] = frame
+	files := make(map[*zip.FileHeader][]byte)
+	for tstamp, frame := range c.recordedFrames {
+		header := &zip.FileHeader {
+			Name:   fmt.Sprintf("%d.jpg", tstamp),
+			Modified: time.Unix(0, tstamp),
+			Method: zip.Store,
+		}
+		files[header] = frame
 	}
 
 	return files
@@ -161,8 +167,7 @@ func (c *Camera) frameTrigger() {
 
 					// Double check, now we have the lock.
 					if camera.Recording {
-						filename := fmt.Sprintf("%d.jpg", t.UnixNano())
-						camera.recordedFrames[filename] = frame
+						camera.recordedFrames[t.UnixNano()] = frame
 					}
 				}(c, frame, when)
 			}

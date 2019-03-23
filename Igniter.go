@@ -1,9 +1,9 @@
 package pi_launch_control
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"periph.io/x/periph/conn/gpio"
 	"sync"
 	"time"
@@ -28,7 +28,7 @@ type Igniter struct {
 	Recordable				`json:"-"`
 	sync.Mutex				`json:"-"`
 
-	recordedState	map[string]IgniterState
+	recordedState	[]IgniterState
 }
 
 func (i *Igniter) eventName() string {
@@ -41,7 +41,7 @@ func (i *Igniter) StartRecording() {
 
 	i.Recording = false
 	i.recordedState = nil
-	i.recordedState = make(map[string]IgniterState)
+	i.recordedState = make([]IgniterState, 0)
 	i.Recording = true
 
 	i.Emit(i.GetState())
@@ -56,20 +56,30 @@ func (i *Igniter) StopRecording() {
 	i.Emit(i.GetState())
 }
 
-func (i *Igniter) GetRecordedData() map[string][]byte {
+func (i *Igniter) GetRecordedData() map[*zip.FileHeader][]byte {
 	i.Lock()
 	defer i.Unlock()
 
-	files := make(map[string][]byte)
-	for fname, state := range i.recordedState {
-		files[fname], _ = json.Marshal(state)
+	files := make(map[*zip.FileHeader][]byte)
+	header := &zip.FileHeader {
+		Name:   "igniter.json",
+		Modified: time.Unix(0, i.recordedState[0].Timestamp),
+		Method: zip.Deflate,
 	}
 
+	files[header], _ = json.Marshal(i.recordedState)
 	return files
 }
 
-func (i *Igniter) GetState() *IgniterState {
-	return &IgniterState{
+func (i *Igniter) GetFirstRecorded() *IgniterState {
+	if i.recordedState != nil {
+		return &(i.recordedState[0])
+	}
+	return nil
+}
+
+func (i *Igniter) GetState() IgniterState {
+	return IgniterState{
 		i.IsReady(),
 		i.IsFiring() || i.firing,
 		i.Recording,
@@ -123,8 +133,7 @@ func (i *Igniter) Emit(v interface{}) {
 			defer igniter.Unlock()
 
 			if state.Recording {
-				filename := fmt.Sprintf("%d-igniter.json", state.Timestamp)
-				igniter.recordedState[filename] = state
+				igniter.recordedState = append(igniter.recordedState, state)
 			}
 		}(i, v.(IgniterState))
 	}

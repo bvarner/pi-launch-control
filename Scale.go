@@ -1,6 +1,7 @@
 package pi_launch_control
 
 import (
+	"archive/zip"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -43,7 +44,7 @@ type Scale struct {
 	// The adjustment scale value.
 	Adjust     		float64
 
-	recordedSamples map[string]Sample
+	recordedSamples []Sample
 }
 
 type Sample struct {
@@ -210,7 +211,7 @@ func (s *Scale) StartRecording() {
 
 	s.Recording = false
 	s.recordedSamples = nil
-	s.recordedSamples = make(map[string]Sample)
+	s.recordedSamples = make([]Sample, 0)
 	s.Recording = true
 
 	s.Emit(s)
@@ -224,16 +225,19 @@ func (s *Scale) StopRecording() {
 	s.Emit(s)
 }
 
-func (s *Scale) GetRecordedData() map[string][]byte {
+func (s *Scale) GetRecordedData() map[*zip.FileHeader][]byte {
 	s.Lock()
 	defer s.Unlock()
 
-	files := make(map[string][]byte)
-	for fname, sample := range s.recordedSamples {
-		files[fname], _ = json.Marshal(sample)
+	files := make(map[*zip.FileHeader][]byte)
+	header := &zip.FileHeader {
+		Name:   "scale.json",
+		Modified: time.Unix(0, s.recordedSamples[0].Timestamp),
+		Method: zip.Deflate,
 	}
 
-	return files;
+	files[header], _ = json.Marshal(s.recordedSamples)
+	return files
 }
 
 func (s *Scale) tickerRead() {
@@ -250,6 +254,7 @@ func (s *Scale) scaleReadLoop(dev *os.File) {
 			p := Sample {
 				Initialized: s.Initialized,
 				Calibrated: s.Calibrated,
+				Recording: s.Recording,
 				ZeroOffset: s.ZeroOffset,
 				Adjust: s.Adjust,
 
@@ -268,8 +273,7 @@ func (s *Scale) scaleReadLoop(dev *os.File) {
 
 					// Double check, now we have the lock.
 					if scale.Recording {
-						filename := fmt.Sprintf("%d-scale.json", sample.Timestamp)
-						scale.recordedSamples[filename] = sample
+						scale.recordedSamples = append(scale.recordedSamples, sample)
 					}
 				}(s, p)
 			}

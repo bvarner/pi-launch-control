@@ -19,7 +19,7 @@ export default class CameraPanel extends HTMLElement {
         this.render();
 
         const controlpanel = document.querySelector('control-panel');
-        controlpanel.eventSource.addEventListener('Camera', evt => this.onCamera());
+        controlpanel.eventSource.addEventListener('Camera', evt => this.onCamera(evt));
         controlpanel.eventSource.addEventListener('open', evt => this.eventStreamConnected(evt));
     }
 
@@ -40,7 +40,8 @@ export default class CameraPanel extends HTMLElement {
     }
 
     onCamera(evt) {
-        // TODO: Handle Camera Events.
+        this.camera = JSON.parse(evt.data);
+        this.render();
     }
 
     render() {

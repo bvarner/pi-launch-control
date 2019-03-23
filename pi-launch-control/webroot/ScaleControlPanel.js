@@ -103,7 +103,7 @@ export default class ScaleControlPanel extends HTMLElement {
 
             samples.forEach(function (sample, idx) {
                 // If we see a move from
-                if (scale.Recording == false && sample.recording == true) {
+                if (scale.Recording == false && sample.Recording == true) {
                     scale.Recording = true;
 
                     scaleChart.data.datasets[0].data = [];

@@ -7,6 +7,11 @@ export default class ControlPanel extends HTMLElement {
 
         this.root = this.attachShadow({mode: 'open'});
 
+        // Events include:
+        //  Scale
+        //  Camera
+        //  Igniter
+        //  Sequence <- (launch / test sequence)
         this.eventSource = new EventSource('/events');
     }
 
