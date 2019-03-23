@@ -20,7 +20,6 @@ export default class ControlPanel extends HTMLElement {
                 <slot></slot> 
             </article>
         `;
-
         render(template, this.root);
     }
 

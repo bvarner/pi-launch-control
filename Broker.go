@@ -39,6 +39,9 @@ func (b *Broker) Start() {
 			case s := <-b.newClients:
 				// A new client is attached and we want to start sending them Outgoing.
 				b.clients[s] = true
+
+
+
 			case s := <-b.defunctClients:
 				delete(b.clients, s)
 				close(s)

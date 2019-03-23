@@ -11,12 +11,19 @@ export default class CameraPanel extends HTMLElement {
         }
     }
 
+    getCameraURL() {
+        return '/camera?' + moment();
+    }
+
     connectedCallback() {
         this.render();
 
         const controlpanel = document.querySelector('control-panel');
         controlpanel.eventSource.addEventListener('Camera', evt => this.onCamera());
+        controlpanel.eventSource.addEventListener('open', evt => this.eventStreamConnected(evt));
+    }
 
+    eventStreamConnected(evt) {
         const cameraPanel = this;
 
         fetch('/camera/status', {
@@ -38,10 +45,11 @@ export default class CameraPanel extends HTMLElement {
 
     render() {
         const camera = this.camera;
+        const imgurl = this.getCameraURL();
         const template = html`
             <section>
                 <div>
-                    <img src="/camera"/>
+                    <img id="pilaunchcam" src="${imgurl}"/>
                 </div>
                 <div>
                     ${camera.Initialized} : ${camera.Recording}

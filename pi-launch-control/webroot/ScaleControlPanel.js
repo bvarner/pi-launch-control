@@ -12,10 +12,16 @@ export default class ScaleControlPanel extends HTMLElement {
             Recording: false,
             Timestamp: moment(),
             Volt0: '',
-            Volt0Mass: 'Please Calibrate',
+            Volt0Mass: null,
             Volt1: '',
-            Volt1Maxx: 'Please Calibrate',
+            Volt1Mass: null,
         };
+
+        this.retention = 10;
+    }
+
+    getVolt0Mass() {
+        return this.scale.Volt0Mass != null ? Math.floor(this.scale.Volt0Mass * 100) / 100 : 0;
     }
 
     connectedCallback() {
@@ -23,6 +29,7 @@ export default class ScaleControlPanel extends HTMLElement {
 
         const controlpanel = document.querySelector('control-panel');
         controlpanel.eventSource.addEventListener('Scale', evt => this.onScaleSample(evt));
+        controlpanel.eventSource.addEventListener('open', evt => this.eventStreamConnected(evt));
 
         const modal = document.querySelector('modal-dialog');
         const scale = this.scale;
@@ -49,17 +56,48 @@ export default class ScaleControlPanel extends HTMLElement {
         });
     }
 
+    eventStreamConnected(evt) {
+        const scaleControlPanel = this;
+
+        fetch('/scale', {
+            method: 'GET',
+            cache: 'no-cache',
+        })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(obj) {
+            scaleControlPanel.scale = obj;
+            scaleControlPanel.render();
+        });
+    }
+
+
+    onTare(evt) {
+        const scaleControlPanel = this;
+
+        fetch('/scale/tare', {
+            method: 'GET',
+            cache: 'no-cache',
+        })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(obj) {
+            scaleControlPanel.scale = obj;
+            scaleControlPanel.render();
+        });
+    }
+
+
     onScaleSample(evt) {
         var samples = JSON.parse(evt.data);
 
         // The scale is an array of measurements taken since the last time a measurement was taken.
-        // We average ~40 / second.
-        // so for a 30 second graph, we'd need 30 * 40, 1200 data points.
 
         // We report the latest (tail) of the samples recieved as the current state of the scale.
         if (samples.length > 0) {
             this.scale = samples[samples.length - 1];
-            this.scale.Volt0Mass = this.scale.Volt0Mass !== null ? this.scale.Volt0Mass : 0;
 
             const scale = this.scale;
 
@@ -79,11 +117,23 @@ export default class ScaleControlPanel extends HTMLElement {
 
             // Shift the chart dataset if we're not recording
             if (scale.Recording == false) {
-                if (scaleChart.data.datasets[0].data.length > 1200) {
-                    scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(scaleChart.data.datasets[0].data.length - 1200);
-                }
-                if (scaleChart.data.datasets[1].data.length > 1200) {
-                    scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(scaleChart.data.datasets[1].data.length - 1200);
+                // Find the index of the data element representing now() - retention.
+                var d = scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data;
+                var retainAfter = moment(d[d.length - 1].x).subtract(this.retention, 'seconds');
+
+                if (d[0].x <= retainAfter) {
+                    var cutIdx = 0;
+                    for (var i = 0; i < d.length; i++) {
+                        if (d[i].x >= retainAfter) {
+                            cutIdx = i;
+                            break;
+                        }
+                    }
+
+                    if (cutIdx > 0) {
+                        scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(cutIdx);
+                        scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(cutIdx);
+                    }
                 }
             }
 
@@ -93,30 +143,29 @@ export default class ScaleControlPanel extends HTMLElement {
         this.render();
     }
 
-    onTare(evt) {
-        fetch('/scale/tare', {
-            cache: "no-cache",
-        })
-        .then(function (response) {
-            return response.json();
-        })
-        .then(function(obj) {
-            console.log(JSON.stringify(obj));
-        });
-    }
-
     onCalibrate(evt) {
         const modal = document.querySelector('modal-dialog');
         modal.visible = true;
     }
 
+    onRetentionChange(evt) {
+        this.retention = evt.target.value;
+        this.render();
+    }
+
     render() {
         const scale = this.scale;
+        const mass = this.getVolt0Mass();
+        const retention = this.retention;
         const template = html`
+            <style> .nodisplay { display: none; } </style>
             <section>
                 <div>
-                    <label>${scale.Volt0Mass}</label>
+                    <label>${mass}</label>
                     <label>${scale.Recording}</label>
+                    <span id="scale-retention" class="${(scale.Recording ? "nodisplay" : "")}" >
+                        <label for="retention">Graph <input type="number" id="scale-retain-seconds" value="${retention}" @change=${(e) => this.onRetentionChange(e)}/> seconds</label>
+                    </span>
                 </div>
                 <div>
                     <button ?disabled=${!scale.Initialized} @click=${(e) => this.onTare(e)}>Tare</button>

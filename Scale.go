@@ -20,6 +20,7 @@ type Scale struct {
 	readTic			time.Ticker `json:"-"`
 	Emitter			`json:"-"`
 	sync.Mutex		`json:"-"`
+	Recordable		`json:"-"`
 	samples			ring.Ring `json:"-"`
 	previousRead	int64
 
@@ -203,11 +204,23 @@ func (s *Scale) tickerTrigger(triggerfd *os.File) {
 }
 
 func (s *Scale) StartRecording() {
+	s.Lock()
+	defer s.Unlock()
+
+	s.Recording = false
+	s.recordedSamples = nil
+	s.recordedSamples = make(map[string]Sample)
 	s.Recording = true
+
+	s.Emit(s)
 }
 
 func (s *Scale) StopRecording() {
+	s.Lock()
+	defer s.Unlock()
 	s.Recording = false
+
+	s.Emit(s)
 }
 
 func (s *Scale) tickerRead() {
@@ -235,11 +248,16 @@ func (s *Scale) scaleReadLoop(dev *os.File) {
 			s.samples.Enqueue(p)
 
 			if s.Recording {
-				fmt.Println("Recording scale data")
 				// Do this in the background so our Read() loop is _toight_
 				go func(scale *Scale, sample Sample) {
-					filename := fmt.Sprintf("%d.json", sample.Timestamp)
-					scale.recordedSamples[filename] = sample
+					scale.Lock()
+					defer scale.Unlock()
+
+					// Double check, now we have the lock.
+					if scale.Recording {
+						filename := fmt.Sprintf("%d.json", sample.Timestamp)
+						scale.recordedSamples[filename] = sample
+					}
 				}(s, p)
 			}
 		} else {

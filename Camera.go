@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"github.com/blackjack/webcam"
 	"net/http"
+	"sync"
 	"time"
 )
 
 type Camera struct {
 	Emitter			`json:"-"`
+	sync.Mutex		`json:"-"`
+	Recordable		`json:"-"`
 	DeviceName		string
 	device 			*webcam.Webcam
 	pixelFormat 	webcam.PixelFormat
@@ -91,6 +94,9 @@ func (c *Camera) eventName() string {
 }
 
 func (c *Camera) Close() {
+	c.Lock()
+	defer c.Unlock()
+
 	c.StopRecording()
 	c.Initialized = false
 	c.device.Close()
@@ -98,10 +104,12 @@ func (c *Camera) Close() {
 }
 
 func (c *Camera) StartRecording() {
+	c.Lock()
+	defer c.Unlock()
 	c.Recording = false
 	// Force it allow the old map to be GCed.
 	c.recordedFrames = nil
-	c.recordedFrames = make(map[string][]byte, 80 * 30) // about 35MB at 16kb per frame.
+	c.recordedFrames = make(map[string][]byte) // about 35MB at 16kb per frame.
 	// Allow other threads to start stuffing things into the array.
 	c.Recording = true
 
@@ -109,6 +117,8 @@ func (c *Camera) StartRecording() {
 }
 
 func (c *Camera) StopRecording() {
+	c.Lock()
+	defer c.Unlock()
 	c.Recording = false
 
 	c.Emit(c)
@@ -133,8 +143,16 @@ func (c *Camera) frameTrigger() {
 			}
 
 			if c.Recording {
-				filename := fmt.Sprintf("%d.jpg", when.UnixNano())
-				c.recordedFrames[filename] = frame
+				go func(camera *Camera, frame []byte, t time.Time) {
+					camera.Lock()
+					defer camera.Unlock()
+
+					// Double check, now we have the lock.
+					if camera.Recording {
+						filename := fmt.Sprintf("%d.jpg", t.UnixNano())
+						camera.recordedFrames[filename] = frame
+					}
+				}(c, frame, when)
 			}
 
 			i++
