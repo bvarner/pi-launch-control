@@ -108,7 +108,7 @@ func RecordingControl(w http.ResponseWriter, r *http.Request) {
 		var err error = nil
 		filename := ""
 		// For each array from the scale and camera.
-		for _, data := range []map[string][]byte { scale.GetRecordedData(), camera.GetRecordedData() } {
+		for _, data := range []map[string][]byte { scale.GetRecordedData(), igniter.GetRecordedData(), camera.GetRecordedData() } {
 			if err != nil {
 				break;
 			}

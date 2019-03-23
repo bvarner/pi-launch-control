@@ -268,7 +268,7 @@ func (s *Scale) scaleReadLoop(dev *os.File) {
 
 					// Double check, now we have the lock.
 					if scale.Recording {
-						filename := fmt.Sprintf("%d.json", sample.Timestamp)
+						filename := fmt.Sprintf("%d-scale.json", sample.Timestamp)
 						scale.recordedSamples[filename] = sample
 					}
 				}(s, p)
