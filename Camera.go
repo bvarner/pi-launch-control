@@ -48,16 +48,19 @@ func NewCamera(dev string, trigger <- chan time.Time) (*Camera, error) {
 	c.EmitterID = c
 	c.trigger = trigger
 	c.DeviceName = dev
-	c.device, err = webcam.Open(dev)
-	if err != nil {
-		return nil, err
-	}
 
 	c.clients = make(map[chan []byte]bool)
 	c.newClients = make(chan (chan []byte))
 	c.defunctClients = make(chan (chan []byte))
 	c.broadcast = make(chan []byte)
 	c.recordedFrames = make(map[int64][]byte)
+	c.Initialized = false
+	c.Recording = false
+
+	c.device, err = webcam.Open(dev)
+	if err != nil {
+		return c, err
+	}
 
 	// Detect capabilities
 	for f := range c.device.GetSupportedFormats() {
@@ -69,14 +72,14 @@ func NewCamera(dev string, trigger <- chan time.Time) (*Camera, error) {
 	// Setup capture format
 	_, _, _, err = c.device.SetImageFormat(c.pixelFormat, 640, 480)
 	if err != nil {
-		return nil, err
+		return c, err
 	}
 
 	// Stuff the device into Streaming mode.
 	c.device.SetBufferCount(1)
 	err = c.device.StartStreaming()
 	if err != nil {
-		return nil, err
+		return c, err
 	}
 
 	// Setup the trigger.
@@ -107,14 +110,16 @@ func (c *Camera) Close() {
 func (c *Camera) StartRecording() {
 	c.Lock()
 	defer c.Unlock()
-	c.Recording = false
-	// Force it allow the old map to be GCed.
-	c.recordedFrames = nil
-	c.recordedFrames = make(map[int64][]byte) // about 35MB at 16kb per frame.
-	// Allow other threads to start stuffing things into the array.
-	c.Recording = true
+	if c.Initialized {
+		c.Recording = false
+		// Force it allow the old map to be GCed.
+		c.recordedFrames = nil
+		c.recordedFrames = make(map[int64][]byte) // about 35MB at 16kb per frame.
+		// Allow other threads to start stuffing things into the array.
+		c.Recording = true
 
-	c.Emit(c)
+		c.Emit(c)
+	}
 }
 
 func (c *Camera) StopRecording() {
@@ -202,7 +207,7 @@ func (c *Camera) clientBroadcast() {
 func (c *Camera) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		f, ok := w.(http.Flusher)
-		if !ok {
+		if !ok || !c.Initialized {
 			http.Error(w, "Streaming Unsupported: ", http.StatusInternalServerError)
 			return
 		}
