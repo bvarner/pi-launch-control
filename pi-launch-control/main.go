@@ -342,18 +342,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Setup the Ticker for triggering scale and image capture.
-	devicePoller := time.NewTicker(12500 * time.Microsecond) // 80hz
-	// Create a channel for the scale and the camera.
+	// Create a channel for the scale and the camera triggers
 	scaleTrigC := make(chan time.Time, 1)
 	camTrigC   := make(chan time.Time, 1)
-	// Go func to send to both of them when devicePoller ticks
-	go func() {
-		for t := range devicePoller.C {
-			scaleTrigC <- t
-			camTrigC <- t
-		}
-	}()
 
 	// Setup the SSE Broker for event data.
 	broker = pi_launch_control.NewBroker()
@@ -373,21 +364,36 @@ func main() {
 	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigC, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
+		fmt.Println("Scale not Initialized: ", err)
 	} else {
 		scale.AddListener(broker.Outgoing)
-		fmt.Println("Scale Present and Tared");
+		fmt.Println("Scale Present")
 		defer scale.Close()
 	}
 
 	// Initialize the Camera
 	camera, err = pi_launch_control.NewCamera("/dev/video0", camTrigC)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Camera not Initialized: ", err)
 	} else {
 		camera.AddListener(broker.Outgoing)
-		fmt.Println("Camera Present and Initialized.")
+		fmt.Println("Camera Present")
 		defer camera.Close()
 	}
+
+	// Setup the Ticker for triggering scale and image capture.
+	devicePoller := time.NewTicker(12500 * time.Microsecond) // 80hz
+	// Go func to send to both of them when devicePoller ticks
+	go func() {
+		for t := range devicePoller.C {
+			if scale.Initialized {
+				scaleTrigC <- t
+			}
+			if camera.Initialized {
+				camTrigC <- t
+			}
+		}
+	}()
 
 	fmt.Println("Setting up HTTP server...")
 

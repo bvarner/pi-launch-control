@@ -184,7 +184,6 @@ func NewScale(dev string, trig <- chan time.Time, triggerDev string) (*Scale, er
 	go s.tickerRead()
 
 	// Tare it up, baby.
-	s.Tare()
 	s.Initialized = true
 
 	return s, err
