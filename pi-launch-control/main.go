@@ -431,13 +431,13 @@ func main() {
 	_, keyerr := os.Stat(*certkey)
 
 	if certerr == nil && keyerr == nil {
-		log.Println("SSL Configuration set up.")
+		fmt.Println("SSL Configuration set up.")
 		go func() {
 			log.Fatal(http.ListenAndServe(":80", http.HandlerFunc(redirectTLS)));
 		} ()
 		log.Fatal(http.ListenAndServeTLS(":443", *cert, *certkey, nil))
 	} else {
-		log.Println("SSL Configuration not found.")
+		fmt.Println("SSL Configuration not found.")
 		log.Fatal(http.ListenAndServe(":80", nil))
 	}
 }
