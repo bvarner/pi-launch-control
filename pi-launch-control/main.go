@@ -374,7 +374,7 @@ func main() {
 		fmt.Println("Igniter not Initialized: ", err)
 	} else {
 		igniter.AddListener(broker.Outgoing)
-
+		fmt.Println("Igniter Initialized")
 	}
 
 	// Initialize the Camera
