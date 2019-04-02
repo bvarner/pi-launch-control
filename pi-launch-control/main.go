@@ -11,8 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"periph.io/x/periph/conn/gpio/gpioreg"
-	"periph.io/x/periph/host"
 	"strconv"
 	"time"
 )
@@ -338,9 +336,6 @@ func redirectTLS(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	var err error = nil
-	if _, err = host.Init(); err != nil {
-		log.Fatal(err)
-	}
 
 	// Create a channel for the scale and the camera triggers
 	scaleTrigC := make(chan time.Time, 1)
@@ -350,13 +345,14 @@ func main() {
 	broker = pi_launch_control.NewBroker()
 	broker.Start()
 
-	// Initialize the Igniter.
-	igniter = &pi_launch_control.Igniter {
-		TestPin: gpioreg.ByName("GPIO17"),
-		FirePin: gpioreg.ByName("GPIO27"),
-	}
-	igniter.EmitterID = igniter
-	igniter.AddListener(broker.Outgoing)
+	// Startup sequence here is important.
+	// The periph.io sysfs driver will export every gpio in the system to sysfs (ugh!)
+	// which ends up allocating all those gpios as exported, in-use.
+	// When the scale device tries to open() for the first time, it cannot get the sck and data pins,
+	// as they're already tied up with sysfs exports.
+	// As such, the only way to 'fix' this is to either set those pins as hogs in the device tree (preferred)
+	// or, to initialize the scale first, then the igniter.
+	// Of course, I could just write a kernel driver for the igniter...
 
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
@@ -369,6 +365,16 @@ func main() {
 		scale.AddListener(broker.Outgoing)
 		fmt.Println("Scale Present")
 		defer scale.Close()
+	}
+
+	// Initialize the Igniter.
+	igniter, err = pi_launch_control.NewIgniter("GPIO17", "GPIO27")
+	if err != nil {
+		fmt.Println(err)
+		fmt.Println("Igniter not Initialized: ", err)
+	} else {
+		igniter.AddListener(broker.Outgoing)
+
 	}
 
 	// Initialize the Camera

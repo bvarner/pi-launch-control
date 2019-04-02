@@ -4,7 +4,10 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"errors"
+	"log"
 	"periph.io/x/periph/conn/gpio"
+	"periph.io/x/periph/conn/gpio/gpioreg"
+	"periph.io/x/periph/host"
 	"sync"
 	"time"
 )
@@ -29,6 +32,21 @@ type Igniter struct {
 	sync.Mutex				`json:"-"`
 
 	recordedState	[]IgniterState
+}
+
+func NewIgniter(testPinName string, firePinName string)(*Igniter, error) {
+	var err error = nil;
+	if _, err = host.Init(); err != nil {
+		log.Fatal(err)
+	}
+
+	i := &Igniter{
+		TestPin: gpioreg.ByName(testPinName),
+		FirePin: gpioreg.ByName(firePinName),
+	}
+	i.EmitterID = i
+
+	return i, err
 }
 
 func (i *Igniter) eventName() string {
