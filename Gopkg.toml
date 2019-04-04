@@ -24,10 +24,7 @@
 #   go-tests = true
 #   unused-packages = true
 
-
-[[constraint]]
-  name = "github.com/GeertJohan/go.rice"
-  version = "1.0.0"
+ignored = ["github.com/GeertJohan/go.rice*"]
 
 [[constraint]]
   branch = "master"
@@ -42,3 +39,5 @@
   version = "3.5.0"
 
 [prune]
+   go-tests = true
+   unused-packages = true
