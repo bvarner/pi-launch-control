@@ -404,6 +404,7 @@ func main() {
 	fmt.Println("Setting up HTTP server...")
 
 	handler = http.FileServer(rice.MustFindBox("webroot").HTTPBox())
+	fmt.Println("Found the rice box.")
 
 	// Setup the handlers.
 	http.HandleFunc("/", RootHandler)
