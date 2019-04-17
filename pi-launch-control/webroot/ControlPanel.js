@@ -37,6 +37,21 @@ export default class ControlPanel extends HTMLElement {
         this.eventSource.addEventListener('Igniter', evt => this.onIgniterEvent(evt));
         this.eventSource.addEventListener( 'Sequence', evt => this.onSequenceEvent(evt));
 
+        const mission = this.mission;
+
+        // Do a fetch to poll the Igniter.
+        fetch ('/igniter', {
+            method: 'GET',
+            cache: 'no-cache',
+        })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(obj) {
+            mission.Igniter = obj;
+            this.render();
+        });
+
         this.render();
     }
 

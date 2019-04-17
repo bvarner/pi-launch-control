@@ -88,7 +88,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// Wrtie to the responsewriter.
+		// Write to the responsewriter.
 		fmt.Fprintf(w, "id: %d\n%s\n", time.Now().Unix(), msg)
 		f.Flush()
 	}

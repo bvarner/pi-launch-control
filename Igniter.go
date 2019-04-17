@@ -46,6 +46,20 @@ func NewIgniter(testPinName string, firePinName string)(*Igniter, error) {
 	}
 	i.EmitterID = i
 
+	// Set it to pull high, so contact sinks to ground. Interrupt on both edges.
+	err = i.TestPin.In(gpio.PullUp, gpio.BothEdges)
+	if err == nil {
+		go func() {
+			for {
+				// If an edge changes
+				i.TestPin.WaitForEdge(-1)
+				i.Emit(i.GetState())
+			}
+		}()
+	} else {
+		log.Print(err)
+	}
+
 	return i, err
 }
 

@@ -179,11 +179,11 @@ func NewScale(dev string, trig <- chan time.Time, triggerDev string) (*Scale, er
 	// Every tick write to the trigger_now file.
 	go s.tickerTrigger(triggerfd)
 
-	// Every second emit a value of the current rolling average
+	// Every 250ms emit a value of the current rolling average
 	s.readTic = *time.NewTicker(250 * time.Millisecond)
 	go s.tickerRead()
 
-	// Tare it up, baby.
+	// Ready for Tare.
 	s.Initialized = true
 
 	return s, err
