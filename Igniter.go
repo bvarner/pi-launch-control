@@ -113,12 +113,12 @@ func (i *Igniter) IsFiring() bool {
 	return i.FirePin.Read() == gpio.High
 }
 
-func (i *Igniter) Fire(force bool) (error) {
+func (i *Igniter) Fire() (error) {
 	i.firing = true;
 	var pulse time.Duration = 0
 
 	// Pulse up to 1 second.
-	for (i.IsReady() || force) && pulse.Seconds() < 1 {
+	for i.IsReady() && pulse.Seconds() < 1 {
 		pulse += 250 * time.Millisecond
 
 		i.FirePin.Out(gpio.Low)

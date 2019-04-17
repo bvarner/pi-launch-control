@@ -1,6 +1,5 @@
 import {html, render} from 'https://unpkg.com/lit-html?module';
 
-// ControlPanel contains a Scale and a Camera.
 export default class ControlPanel extends HTMLElement {
     constructor() {
         super();
@@ -11,7 +10,7 @@ export default class ControlPanel extends HTMLElement {
         //  Scale
         //  Camera
         //  Igniter
-        //  Sequence <- (launch / test sequence)
+        //  Sequence <- (Mission Status / Countdown)
         this.eventSource = new EventSource('/events');
     }
 

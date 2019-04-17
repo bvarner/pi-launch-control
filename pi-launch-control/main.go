@@ -114,19 +114,7 @@ func CameraStatusControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
-	var err error = nil
-	if r.Method == "POST" {
-		err = igniter.Fire(false);
-
-		if err != nil {
-			w.WriteHeader(http.StatusExpectationFailed)
-			w.Write([]byte(err.Error() + "\n"))
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-	}
-
-	if r.Method == "GET" || r.Method == "POST" {
+	if r.Method == "GET" {
 		json.NewEncoder(w).Encode(igniter.GetState())
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -141,6 +129,13 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 		if sequenceTicker != nil {
 			w.WriteHeader(http.StatusExpectationFailed)
 			w.Write([]byte("417 - Mission Already Underway"))
+			return
+		}
+
+		// Check to verify Igniter is OK.
+		if !igniter.IsReady() {
+			w.WriteHeader(http.StatusExpectationFailed)
+			w.Write([]byte("417 - Check Igniter Connections."))
 			return
 		}
 
@@ -175,6 +170,22 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 					sequenceTicker.Stop()
 					break;
 				}
+			}
+
+			// Paranoia and final countdown @ zero.
+			obj := map[string]interface{}{
+				"Timestamp": time.Now().UnixNano(),
+				"Remaining": 0,
+				"Aborted":   !igniter.IsReady(),
+			}
+			b, err := json.Marshal(obj)
+			if err == nil {
+				s := fmt.Sprintf("event: %s:\ndata: %s\n", "Sequence", string(b))
+				brok.Outgoing <- s
+			}
+
+			if igniter.IsReady() {
+				igniter.Fire()
 			}
 		}(broker)
 	case "/mission/stop":

@@ -106,19 +106,21 @@ export default class ScaleControlPanel extends HTMLElement {
                 if (scale.Recording == false && sample.Recording == true) {
                     scale.Recording = true;
 
-                    scaleChart.data.datasets[0].data = [];
-                    scaleChart.data.datasets[1].data = [];
+                    missionChart.data.datasets[0].data = [];
+                    missionChart.data.datasets[1].data = [];
+                    missionChart.data.datasets[2].data = [];
                 }
 
                 const ts = moment(Math.floor(sample.Timestamp / 1000000));
-                scaleChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
-                scaleChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
+                missionChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
+                missionChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
+                missionChart.data.datasets[2].data.push({x: ts, y: null});
             });
 
             // Shift the chart dataset if we're not recording
             if (scale.Recording == false) {
                 // Find the index of the data element representing now() - retention.
-                var d = scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data;
+                var d = missionChart.data.datasets[0].data = missionChart.data.datasets[0].data;
                 var retainAfter = moment(d[d.length - 1].x).subtract(this.retention, 'seconds');
 
                 if (d[0].x <= retainAfter) {
@@ -131,13 +133,14 @@ export default class ScaleControlPanel extends HTMLElement {
                     }
 
                     if (cutIdx > 0) {
-                        scaleChart.data.datasets[0].data = scaleChart.data.datasets[0].data.slice(cutIdx);
-                        scaleChart.data.datasets[1].data = scaleChart.data.datasets[1].data.slice(cutIdx);
+                        missionChart.data.datasets[0].data = missionChart.data.datasets[0].data.slice(cutIdx);
+                        missionChart.data.datasets[1].data = missionChart.data.datasets[1].data.slice(cutIdx);
+                        missionChart.data.datasets[2].data = missionChart.datasets[2].data.slice(cutIdx);
                     }
                 }
             }
 
-            scaleChart.update();
+            missionChart.update();
         }
 
         this.render();
@@ -159,7 +162,7 @@ export default class ScaleControlPanel extends HTMLElement {
         const retention = this.retention;
         const template = html`
             <style> .nodisplay { display: none; } </style>
-            <section>
+            <section class="${(scale.Initialized ? "" : "nodisplay")}">
                 <div>
                     <label>${mass}</label>
                     <label>${scale.Recording}</label>

@@ -19,12 +19,12 @@
         </aside>
         <control-panel style="width: 100%;">
             <section style="display: inline-block;">
-                <canvas id='scale-chart' style="width: 640px; height: 480px;"></canvas>
+                <canvas id='mission-chart' style="width: 640px; height: 480px;"></canvas>
                 <script src="./moment.min.js"></script>
                 <script src="./Chart.min.js"></script>
                 <script>
-                    const ctx = document.getElementById('scale-chart');
-                    const scaleChart = new Chart(ctx, {
+                    const ctx = document.getElementById('mission-chart');
+                    const missionChart = new Chart(ctx, {
                         type: 'line',
                         data: {
                             datasets: [
@@ -47,6 +47,16 @@
                                     backgroundColor: 'rgba(54, 162, 235, 1)',
                                     borderColor: 'rgba(54, 162, 235, 1)',
                                     pointRadius: 0,
+                                },
+                                {
+                                    label: 'Igniter',
+                                    lineTension: 0,
+                                    fill: false,
+                                    data: [],
+                                    yAxisID: 'y-igniter',
+                                    backgroundColor: 'rgba(235, 54, 54, 1)',
+                                    borderColor: 'rgba(235, 54, 54, 1)',
+                                    pointRadius: 0,
                                 }
                             ],
                         },
@@ -57,22 +67,25 @@
                                 easing: 'linear',
                             },
                             scales: {
-                                xAxes: [{
+                                xAxes: [
+                                {
                                     type: 'time',
                                     display: true,
                                     distribution: 'linear',
                                     time: {
                                         unit: 'second',
-                                    }
-                                }],
-                                yAxes: [{
+                                    },
+                                }
+                                ],
+                                yAxes: [
+                                {
                                     display: true,
                                     id: 'y-raw',
                                     type: 'linear',
                                     position: 'right',
                                     ticks: {
                                         beginAtZero: true,
-                                    }
+                                    },
                                 }, {
                                     display: true,
                                     labelString: 'mass (g)',
@@ -83,15 +96,27 @@
                                         suggestedMin: -10,
                                         suggestedMax: 50,
                                         beginAtZero: true,
-                                    }
-                                }],
+                                    },
+                                }, {
+                                    display: 'true',
+                                    labelString: 'igniter',
+                                    id: 'y-igniter',
+                                    type: 'linear',
+                                    position: 'right',
+                                    ticks: {
+                                        suggestedMin: 0,
+                                        suggestedMax: 1,
+                                        beginAtZero: true,
+                                    },
+                                },
+                                ],
                             },
                         },
                     });
                 </script>
                 <scale-control-panel>
                 </scale-control-panel>
-                <modal-dialog title="Calibration">
+                <modal-dialog title="Scale Calibration">
                     <form action="#">
                         <div>
                             <label for="mass">Known Mass:</label>
@@ -101,7 +126,6 @@
                 </modal-dialog>
             </section>
             <camera-panel style="display: inline-block;"></camera-panel>
-            <!--<igniter-panel></igniter-panel>-->
         </control-panel>
         <footer>
             <hr/>
