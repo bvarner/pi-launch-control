@@ -135,7 +135,7 @@ export default class ScaleControlPanel extends HTMLElement {
                     if (cutIdx > 0) {
                         missionChart.data.datasets[0].data = missionChart.data.datasets[0].data.slice(cutIdx);
                         missionChart.data.datasets[1].data = missionChart.data.datasets[1].data.slice(cutIdx);
-                        missionChart.data.datasets[2].data = missionChart.datasets[2].data.slice(cutIdx);
+                        missionChart.data.datasets[2].data = missionChart.data.datasets[2].data.slice(cutIdx);
                     }
                 }
             }
