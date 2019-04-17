@@ -225,6 +225,7 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 
 		obj := map[string]interface{}{
 			"Timestamp": time.Now().UnixNano(),
+			"Remaining": -1,
 			"Aborted":   true,
 		}
 
@@ -236,32 +237,43 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 	case "/mission/download":
 		if r.Method == "GET" {
 			buf := new(bytes.Buffer)
-			zw := zip.NewWriter(buf)
-
-			// Create an array / slice of devices to get data from.
-			// If we get an error on doing anything with a device file, we bail.
-			var err error = nil
-
-			devices := make([]map[*zip.FileHeader][]byte, 1)
-
-			total := 0
-			complete := 0
-
-			// Always add the igniter.
-			devices[0] = igniter.GetRecordedData()
-			total += len(devices[0])
-			if scale.Initialized {
-				devices = append(devices, scale.GetRecordedData())
-				total += len(devices[len(devices) - 1])
-			}
-			if camera.Initialized {
-				devices = append(devices, camera.GetRecordedData())
-				total += len(devices[len(devices) - 1])
-			}
-
 			filename := ""
+
 			if igniter.GetFirstRecorded() != nil {
-				filename = fmt.Sprintf("%d.zip", igniter.GetFirstRecorded().Timestamp)
+				zw := zip.NewWriter(buf)
+
+				// Create an array / slice of devices to get data from.
+				// If we get an error on doing anything with a device file, we bail.
+				var err error = nil
+
+				devices := make([]map[*zip.FileHeader][]byte, 1)
+
+				total := 0
+				complete := 0
+
+				// Always add the igniter.
+				devices[0] = igniter.GetRecordedData()
+				total += len(devices[0])
+				if scale.Initialized {
+					devices = append(devices, scale.GetRecordedData())
+					total += len(devices[len(devices)-1])
+				}
+				if camera.Initialized {
+					devices = append(devices, camera.GetRecordedData())
+					total += len(devices[len(devices)-1])
+				}
+
+				filename = fmt.Sprintf("%d", igniter.GetFirstRecorded().Timestamp)
+
+				// If we have a name query param, add it.
+				namekeys, ok := r.URL.Query()["name"]
+				if ok {
+					filename = fmt.Sprintf("%s-%s", filename, namekeys[0])
+				}
+
+				// Append the .zip.
+				filename = fmt.Sprintf("%s.zip", filename)
+				// And away we go.
 				for _, data := range devices {
 					if err != nil {
 						break;

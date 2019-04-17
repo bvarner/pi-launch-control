@@ -58,7 +58,6 @@ func (i *Igniter) StartRecording() {
 	defer i.Unlock()
 
 	i.Recording = false
-	i.recordedState = nil
 	i.recordedState = make([]IgniterState, 0)
 	i.Recording = true
 
