@@ -108,13 +108,11 @@ export default class ScaleControlPanel extends HTMLElement {
 
                     missionChart.data.datasets[0].data = [];
                     missionChart.data.datasets[1].data = [];
-                    missionChart.data.datasets[2].data = [];
                 }
 
                 const ts = moment(Math.floor(sample.Timestamp / 1000000));
                 missionChart.data.datasets[0].data.push({x: ts, y: sample.Volt0});
                 missionChart.data.datasets[1].data.push({x: ts, y: sample.Volt0Mass});
-                missionChart.data.datasets[2].data.push({x: ts, y: null});
             });
 
             // Shift the chart dataset if we're not recording
@@ -135,7 +133,6 @@ export default class ScaleControlPanel extends HTMLElement {
                     if (cutIdx > 0) {
                         missionChart.data.datasets[0].data = missionChart.data.datasets[0].data.slice(cutIdx);
                         missionChart.data.datasets[1].data = missionChart.data.datasets[1].data.slice(cutIdx);
-                        missionChart.data.datasets[2].data = missionChart.data.datasets[2].data.slice(cutIdx);
                     }
                 }
             }

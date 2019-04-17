@@ -112,9 +112,8 @@ func (c *Camera) StartRecording() {
 	defer c.Unlock()
 	if c.Initialized {
 		c.Recording = false
-		// Force it allow the old map to be GCed.
 		c.recordedFrames = nil
-		c.recordedFrames = make(map[int64][]byte) // about 35MB at 16kb per frame.
+		c.recordedFrames = make(map[int64][]byte)
 		// Allow other threads to start stuffing things into the array.
 		c.Recording = true
 
@@ -128,6 +127,15 @@ func (c *Camera) StopRecording() {
 	c.Recording = false
 
 	c.Emit(c)
+}
+
+func (c *Camera) ResetRecording() {
+	c.Lock()
+	defer c.Unlock()
+
+	c.Recording = false
+	c.recordedFrames = nil
+	c.recordedFrames = make(map[int64][]byte)
 }
 
 func (c *Camera) GetRecordedData() map[*zip.FileHeader][]byte {

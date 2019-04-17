@@ -224,6 +224,15 @@ func (s *Scale) StopRecording() {
 	s.Emit(s)
 }
 
+func (s *Scale) ResetRecording() {
+	s.Lock()
+	defer s.Unlock()
+
+	s.Recording = false
+	s.recordedSamples = nil
+	s.recordedSamples = make([]Sample, 0)
+}
+
 func (s *Scale) GetRecordedData() map[*zip.FileHeader][]byte {
 	s.Lock()
 	defer s.Unlock()

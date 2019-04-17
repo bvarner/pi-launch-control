@@ -67,11 +67,21 @@ func (i *Igniter) eventName() string {
 	return "Igniter"
 }
 
+func (i *Igniter) ResetRecording() {
+	i.Lock()
+	defer i.Unlock()
+
+	i.Recording = false
+	i.recordedState = nil
+	i.recordedState = make([]IgniterState, 0)
+}
+
 func (i *Igniter) StartRecording() {
 	i.Lock()
 	defer i.Unlock()
 
 	i.Recording = false
+	i.recordedState = nil
 	i.recordedState = make([]IgniterState, 0)
 	i.Recording = true
 
@@ -135,18 +145,16 @@ func (i *Igniter) Fire() (error) {
 		pulse += 250 * time.Millisecond
 
 		i.FirePin.Out(gpio.Low)
-		i.Emit(i.GetState())
-
 		i.FirePin.Out(gpio.High)
 		i.Emit(i.GetState())
-
 		time.Sleep(pulse)
+
 		i.FirePin.Out(gpio.Low)
 		i.Emit(i.GetState())
-
 		time.Sleep(500 * time.Millisecond) // half-second between pulses.
 	}
 	i.firing = false;
+	i.Emit(i.GetState())
 
 	// Never fired, not forced.
 	if pulse == 0 {

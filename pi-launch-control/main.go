@@ -165,25 +165,27 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 						s := fmt.Sprintf("event: %s\ndata: %s\n", "Sequence", string(b))
 						brok.Outgoing <- s
 					}
-					i = i - 1
 				} else {
 					sequenceTicker.Stop()
 					break;
 				}
+				i = i - 1
 			}
 
 			// Paranoia and final countdown @ zero.
-			obj := map[string]interface{}{
-				"Timestamp": time.Now().UnixNano(),
-				"Remaining": 0,
-				"Aborted":   !igniter.IsReady(),
-			}
-			b, err := json.Marshal(obj)
-			if err == nil {
-				s := fmt.Sprintf("event: %s:\ndata: %s\n", "Sequence", string(b))
-				brok.Outgoing <- s
-			}
+			//obj := map[string]interface{}{
+			//	"Timestamp": time.Now().UnixNano(),
+			//	"Remaining": 0,
+			//	"Aborted":   !igniter.IsReady(),
+			//}
+			//
+			//b, err := json.Marshal(obj)
+			//if err == nil {
+			//	s := fmt.Sprintf("event: %s:\ndata: %s\n", "Sequence", string(b))
+			//	brok.Outgoing <- s
+			//}
 
+			// Paranoia.
 			if igniter.IsReady() {
 				igniter.Fire()
 			}
