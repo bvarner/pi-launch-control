@@ -13,14 +13,15 @@ export default class ControlPanel extends HTMLElement {
 
         // This panel responds to the following:
         //  Igniter
-        //  Sequence <- (Mission Status / Countdown)
+        //  Mission <- (Mission Status / Countdown)
         this.eventSource = new EventSource('/events');
 
         this.mission = {
             Name: 'Untitled',
             Running: false,
             Aborted: false,
-            Remaining: -1,
+            Complete: false,
+            Clock: NaN,
             Igniter: {
                 Ready: false,
                 Firing: false,
@@ -33,7 +34,7 @@ export default class ControlPanel extends HTMLElement {
 
     connectedCallback() {
         this.eventSource.addEventListener('Igniter', evt => this.onIgniterEvent(evt));
-        this.eventSource.addEventListener( 'Sequence', evt => this.onSequenceEvent(evt));
+        this.eventSource.addEventListener( 'Mission', evt => this.onMissionEvent(evt));
 
         const controlPanel = this;
 
@@ -62,11 +63,20 @@ export default class ControlPanel extends HTMLElement {
     }
 
 
-    onSequenceEvent(evt) {
-        var sequence = JSON.parse(evt.data);
+    onMissionEvent(evt) {
+        var mission = JSON.parse(evt.data);
 
-        this.mission.Remaining = sequence.Remaining;
-        this.mission.Aborted = sequence.Aborted;
+        this.mission.Clock = mission.Clock;
+        this.mission.Aborted = mission.Aborted;
+        if (this.mission.Aborted) {
+            this.mission.Running = false;
+        }
+
+        if (mission.Complete && !this.mission.Complete) {
+            this.mission.Complete = mission.Complete;
+            this.onCompleteMission(evt);
+        }
+        this.mission.Complete = mission.Complete;
 
         this.render();
     }
@@ -94,27 +104,17 @@ export default class ControlPanel extends HTMLElement {
     onCompleteMission(evt) {
         const controlPanel = this;
 
-        // Assume it works.
+        // Fetch the file or get the URL, or whatever.
+        window.open('/mission/download?name=' + controlPanel.mission.Name, "_blank", "", false);
+
+        controlPanel.mission.Name = 'Untitled';
         controlPanel.mission.Running = false;
+        controlPanel.mission.Aborted = false;
+        controlPanel.mission.Complete = false;
+        controlPanel.mission.Remaining = -1;
+        controlPanel.mission.Clock = NaN;
+
         controlPanel.render();
-
-        // Background fetch.
-        fetch ('/mission/stop', {
-            method: 'GET',
-            cache: 'no-cache',
-        })
-        .then(function(response) {
-            if (response.status === 200 || response.status === 417) {
-                // Fetch the file or get the URL, or whatever.
-                window.open('/mission/download?name=' + controlPanel.mission.Name);
-            }
-            controlPanel.mission.Name = 'Untitled';
-            controlPanel.mission.Running = false;
-            controlPanel.mission.Aborted = false;
-            controlPanel.mission.Remaining = -1;
-
-            controlPanel.render();
-        })
 
         this.render();
     }
@@ -124,6 +124,7 @@ export default class ControlPanel extends HTMLElement {
 
         controlPanel.mission.Running = false;
         controlPanel.mission.Aborted = true;
+        controlPanel.mission.Complete = false;
         controlPanel.render();
 
         fetch ('/mission/abort', {
@@ -133,7 +134,7 @@ export default class ControlPanel extends HTMLElement {
         .then(function(response) {
             controlPanel.mission.Running = false;
             controlPanel.mission.Aborted = (response.status === 200 || response.status === 417);
-            controlPanel.mission.Remaining = -1;
+            controlPanel.mission.Clock = NaN;
             controlPanel.render();
         })
     }
@@ -165,15 +166,13 @@ export default class ControlPanel extends HTMLElement {
                         <input type="text" id="mission.name" ?disabled=${mission.Running} value="${mission.Name}" @change=${(e) => this.onNameChange(e)}/>
                         
                         <button @click=${(e) => this.onStart(e)} ?disabled=${!mission.Igniter.Ready || mission.Running}>Start</button>
-                        <button @click=${(e) => this.onAbort(e)} ?disabled=${!mission.Running}>ABORT</button>
+                        <button @click=${(e) => this.onAbort(e)} ?disabled=${!mission.Running || mission.Aborted }>ABORT</button>
                         
-                        <label for="mission.remaining">Countdown: </label>
-                        <label id="mission.remaining">${(mission.Remaining >= 0) ? mission.Remaining : "--"}</label>
+                        <label for="mission.clock">Clock: </label>
+                        <label id="mission.clock">${isNaN(mission.Clock) ? "--" : mission.Clock}</label>
                         
                         <label for="mission.igniter">Igniter: </label>
                         <label id="mission.igniter" class="${(mission.Igniter.Firing ? "hoton" : "")}">${IgniterState}</label>
-                        
-                        <button @click=${(e) => this.onCompleteMission(e)} ?disabled=${!mission.Running || (mission.Running && mission.Aborted)}>Complete</button>
                     </div>
             </article>
         `;

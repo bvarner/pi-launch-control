@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var sequenceTicker *time.Ticker
+var mission *pi_launch_control.Mission
 
 var igniter *pi_launch_control.Igniter
 
@@ -126,10 +126,17 @@ func IgniterControl(w http.ResponseWriter, r *http.Request) {
 func MissionControl(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/mission/start":
-		if sequenceTicker != nil {
-			w.WriteHeader(http.StatusExpectationFailed)
-			w.Write([]byte("417 - Mission Already Underway"))
-			return
+		if mission != nil {
+			if mission.Aborted || mission.Complete {
+				// Make sure we call this from the server side.
+				mission.Abort()
+				mission = nil
+				// So that we can carry on now with a new mission.
+			} else {
+				w.WriteHeader(http.StatusExpectationFailed)
+				w.Write([]byte("417 - Mission Already Underway"))
+				return
+			}
 		}
 
 		// Check to verify Igniter is OK.
@@ -139,103 +146,17 @@ func MissionControl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Igniter First.
-		igniter.StartRecording()
-		if scale.Initialized {
-			scale.StartRecording()
-		}
-		if camera.Initialized {
-			camera.StartRecording()
-		}
-
-		// Setup a ticker
-		sequenceTicker = time.NewTicker(1 * time.Second)
-		go func(brok *pi_launch_control.Broker) {
-			i := 10 // 10 Second Countdown
-			for t := range sequenceTicker.C {
-				if i >= 0 {
-					obj := map[string]interface{}{
-						"Timestamp": t.UnixNano(),
-						"Remaining": i,
-						"Aborted":   false,
-					}
-
-					b, err := json.Marshal(obj)
-					if err == nil {
-						s := fmt.Sprintf("event: %s\ndata: %s\n", "Sequence", string(b))
-						brok.Outgoing <- s
-					}
-				} else {
-					sequenceTicker.Stop()
-					break;
-				}
-				i = i - 1
-			}
-
-			// Paranoia and final countdown @ zero.
-			//obj := map[string]interface{}{
-			//	"Timestamp": time.Now().UnixNano(),
-			//	"Remaining": 0,
-			//	"Aborted":   !igniter.IsReady(),
-			//}
-			//
-			//b, err := json.Marshal(obj)
-			//if err == nil {
-			//	s := fmt.Sprintf("event: %s:\ndata: %s\n", "Sequence", string(b))
-			//	brok.Outgoing <- s
-			//}
-
-			// Paranoia.
-			if igniter.IsReady() {
-				igniter.Fire()
-			}
-		}(broker)
-	case "/mission/stop":
-		if sequenceTicker == nil {
-			w.WriteHeader(http.StatusExpectationFailed)
-			w.Write([]byte("417 - No Mission in Progress"))
-			return
-		}
-		sequenceTicker.Stop()
-		sequenceTicker = nil
-
-		// Igniter Last. (inverse order)
-		if camera.Initialized {
-			camera.StopRecording()
-		}
-		if scale.Initialized {
-			scale.StopRecording()
-		}
-		igniter.StopRecording()
+		mission = pi_launch_control.NewMission(igniter, scale, camera)
+		mission.Start(broker)
 	case "/mission/abort":
-		if sequenceTicker == nil {
+		if mission == nil {
 			w.WriteHeader(http.StatusExpectationFailed)
 			w.Write([]byte("417 - No Mission in Progress"))
 			return
 		}
-		// Igniter Last. (inverse order)
-		if camera.Initialized {
-			camera.StopRecording()
-		}
-		if scale.Initialized {
-			scale.StopRecording()
-		}
-		igniter.StopRecording()
 
-		sequenceTicker.Stop()
-		sequenceTicker = nil
-
-		obj := map[string]interface{}{
-			"Timestamp": time.Now().UnixNano(),
-			"Remaining": -1,
-			"Aborted":   true,
-		}
-
-		b, err := json.Marshal(obj)
-		if err == nil {
-			s := fmt.Sprintf("event: %s\ndata: %s\n", "Sequence", string(b))
-			broker.Outgoing <- s
-		}
+		mission.Abort()
+		mission = nil
 	case "/mission/download":
 		if r.Method == "GET" {
 			buf := new(bytes.Buffer)
@@ -425,6 +346,9 @@ func main() {
 			}
 		}
 	}()
+
+	// Setup no initial Mission
+	mission = nil
 
 	fmt.Println("Setting up HTTP server...")
 
