@@ -30,6 +30,8 @@ export default class ControlPanel extends HTMLElement {
             },
         }
 
+        this.clockSynch = false;
+
     }
 
     connectedCallback() {
@@ -139,6 +141,23 @@ export default class ControlPanel extends HTMLElement {
         })
     }
 
+    onSynchClock(evt) {
+        const controlPanel = this;
+
+        fetch ("/clock?tstamp=" + Math.round(Date.now() / 1000), {
+            method: 'POST',
+            cache: 'no-cache'
+        })
+        .then(function(response) {
+            if (response.status === 200) {
+                controlPanel.clockSynch = true;
+            } else {
+                controlPanel.clockSynch = false;
+            }
+            controlPanel.render();
+        })
+    }
+
     onNameChange(evt) {
         this.mission.Name = evt.target.value;
     }
@@ -174,6 +193,10 @@ export default class ControlPanel extends HTMLElement {
                         <label for="mission.igniter">Igniter: </label>
                         <label id="mission.igniter" class="${(mission.Igniter.Firing ? "hoton" : "")}">${IgniterState}</label>
                     </div>
+                </section>
+                <section>
+                    <div><button @click=${(e) => this.onSynchClock(e)} ?disabled=${this.clockSynch}>Synchronize Clock</button></div>
+                </section>
             </article>
         `;
         render(template, this.root);

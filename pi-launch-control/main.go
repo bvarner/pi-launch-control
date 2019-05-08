@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -107,6 +108,26 @@ func RootHandler(w http.ResponseWriter, r *http.Request) {
 func CameraStatusControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		json.NewEncoder(w).Encode(camera)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"))
+	}
+}
+
+func ClockControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		keys, ok := r.URL.Query()["tstamp"]
+		if ok {
+			timestamp, err := strconv.ParseUint(keys[0], 10, 64)
+			args := []string{fmt.Sprintf("@%d", timestamp)}
+			_, err = exec.Command("date", args...).Output()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+			} else {
+				w.WriteHeader(http.StatusOK)
+			}
+		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"))
@@ -365,6 +386,8 @@ func main() {
 
 	http.HandleFunc("/camera", camera.ServeHTTP)
 	http.HandleFunc("/camera/status", CameraStatusControl)
+
+	http.HandleFunc("/clock", ClockControl)
 
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
