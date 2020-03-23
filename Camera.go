@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+
+// Representation of Camera state.
+//
+// swagger:model
 type Camera struct {
 	Emitter			`json:"-"`
 	sync.Mutex		`json:"-"`

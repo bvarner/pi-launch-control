@@ -1,3 +1,17 @@
+// pi-launch-control API.
+//
+// Provides a means to control a model rocket motor test stand.
+//
+// Schemes: https
+// Host: localhost
+// BasePath: /
+// Consumes:
+// - application/json
+//
+// Produces:
+// - application/json
+//
+// swagger:meta
 package main
 
 import (
@@ -28,6 +42,18 @@ var broker *pi_launch_control.Broker
 
 var handler http.Handler
 
+// swagger:operation GET /scale getScale
+//
+// Returns the scale state.
+//
+// ---
+// produces:
+// - application/json
+// responses:
+//   '200':
+//     description: scale response
+//     schema:
+//       "$ref": "#/definitions/Scale"
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		var nscale *pi_launch_control.Scale
@@ -56,7 +82,7 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
+// swagger: operation GET /scale/tare
 func TareScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && (r.Method == "GET" || r.Method == "POST") {
 		scale.Tare()

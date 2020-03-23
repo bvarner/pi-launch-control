@@ -16,7 +16,9 @@ import (
 	"time"
 )
 
-/* Scale Settings */
+// Representation of Scale state.
+//
+// swagger:model
 type Scale struct {
 	TriggerC		<- chan time.Time `json:"-"'`
 	readTic			time.Ticker `json:"-"`
@@ -47,6 +49,9 @@ type Scale struct {
 	recordedSamples []Sample
 }
 
+// Representation of a Scale Measurement
+//
+// swagger:model
 type Sample struct {
 	Initialized bool
 	Calibrated  bool

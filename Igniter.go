@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// Representation of Igniter state.
+//
+// swagger:model
 type IgniterState struct {
 	Ready		bool
 	Firing		bool
