@@ -24,7 +24,7 @@ type IgniterState struct {
 
 /* How we communicate with the Igniter */
 type Igniter struct {
-	TestPin 	gpio.PinIO	`json:"-"'`
+	TestPin 	gpio.PinIO	`json:"-"`
 	FirePin		gpio.PinIO	`json:"-"`
 
 	firing		bool
@@ -140,7 +140,7 @@ func (i *Igniter) IsFiring() bool {
 }
 
 func (i *Igniter) Fire() (error) {
-	i.firing = true;
+	i.firing = true
 	var pulse time.Duration = 0
 
 	// Pulse up to 1 second.

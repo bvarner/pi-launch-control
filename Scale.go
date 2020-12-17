@@ -102,9 +102,9 @@ func NewScale(dev string, trig <- chan time.Time, triggerDev string) (*Scale, er
 
 	for _, f := range files {
 		if strings.HasPrefix(f.Name(), "iio:device") {
-			s.iIODevice = dev + "/" + f.Name();
-			s.devDevice = "/dev/" + f.Name();
-			break;
+			s.iIODevice = dev + "/" + f.Name()
+			s.devDevice = "/dev/" + f.Name()
+			break
 		}
 	}
 
