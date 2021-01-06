@@ -346,9 +346,9 @@ func main() {
 	// As such, the only way to 'fix' this is to either set those pins as hogs in the device tree (preferred)
 	// or, to initialize the scale first, then the igniter.
 	// Of course, I could just write a kernel driver for the igniter...
-
+	
 	// Initialize the Scale.
-	scaleDevice := "/sys/devices/platform/0.weight"
+	scaleDevice := "/sys/devices/platform/weight@0"
 	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0"
 	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigC, scaleTrigger);
 	if err != nil {
