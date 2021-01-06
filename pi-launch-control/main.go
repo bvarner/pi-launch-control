@@ -385,10 +385,10 @@ func main() {
 	// Go func to send to both of them when devicePoller ticks
 	go func() {
 		for t := range devicePoller.C {
-			if scale.Initialized {
+			if scale != nil && scale.Initialized {
 				scaleTrigC <- t
 			}
-			if camera.Initialized {
+			if camera != nil && camera.Initialized {
 				camTrigC <- t
 			}
 		}
