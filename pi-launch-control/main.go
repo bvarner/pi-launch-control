@@ -1,143 +1,59 @@
+// pi-launch-control API.
+//
+// Provides a means to control a model rocket motor test stand.
+//
+// Schemes: https
+// Host: localhost
+// BasePath: /
+// Consumes:
+// - application/json
+//
+// Produces:
+// - application/json
+//
+// swagger:meta
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/GeertJohan/go.rice"
 	"github.com/bvarner/pi-launch-control"
-	"github.com/dhowden/raspicam"
 	"log"
 	"net/http"
 	"os"
-	"periph.io/x/periph/conn/gpio/gpioreg"
-	"periph.io/x/periph/host"
+	"os/exec"
 	"strconv"
 	"time"
 )
+
+var mission *pi_launch_control.Mission
 
 var igniter *pi_launch_control.Igniter
 
 var scale *pi_launch_control.Scale
 
-/* Video Camera Settings  */
-var videoProfile = *raspicam.NewVid()
-var cameraProfile = *raspicam.NewStill()
+var camera *pi_launch_control.Camera
 
+var broker *pi_launch_control.Broker
 
-func CameraControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		errCh := make(chan error)
-		go func() {
-			for x := range errCh {
-				fmt.Fprintf(os.Stderr, "%v\n", x)
-			}
-		}()
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".jpg\"")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
-		w.Header().Set("Pragma", "no-cache") // HTTP 1.0.
-		w.Header().Set("Expires", "0") // Proxies.
+var handler http.Handler
 
-		raspicam.Capture(&cameraProfile, w, errCh)
-	}
-}
-
-func VideoControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		errCh := make(chan error)
-		go func() {
-			for x := range errCh {
-				fmt.Fprintf(os.Stderr, "%v\n", x)
-			}
-		}()
-		w.Header().Set("Content-Type", "video/h264")
-		w.Header().Set("Content-Disposition", "inline; filename=\"rocketstand_" + time.Now().Format(time.RFC3339Nano) + ".h264\"")
-		raspicam.Capture(&videoProfile, w, errCh)
-	}
-}
-
-func TestControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	if (!scale.Initialized || !scale.Calibrated) && !force {
-		w.Write([]byte("Scale Not Initialized or Not Calibrated."))
-		w.WriteHeader(http.StatusPreconditionFailed)
-		return
-	}
-
-	LaunchControl(w, r)
-}
-
-func LaunchControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	if igniter.IsReady() || force {
-		// Push the Camera and data feed file.
-		p, ok := w.(http.Pusher)
-		if ok {
-			p.Push("/camera/video", nil)
-			if scale.Initialized && scale.Calibrated {
-				p.Push("/scale/capture", nil)
-			}
-			if force {
-				p.Push(fmt.Sprintf("/igniter/countdown?force=%t", force), nil)
-			} else {
-				p.Push("/igniter/countdown", nil)
-			}
-		}
-
-		// TODO: Return the document that forces a browser to get the resources...
-
-	} else if (!force) {
-		w.Write([]byte("Igniter not ready."));
-	}
-	return
-}
-
-func IgniterCountdownControl(w http.ResponseWriter, r *http.Request) {
-	force := false
-	keys, ok := r.URL.Query()["force"]
-	if ok {
-		force = len(keys) > 0
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Cache-Control", "max-age=0")
-
-	flusher, ok := w.(http.Flusher)
-	if ok {
-		i := 5
-		for i > 0 {
-			w.Write([]byte(fmt.Sprintf("%x", i)))
-			flusher.Flush();
-			time.Sleep(1 * time.Second)
-			i--
-		}
-		w.Write([]byte("Fire"))
-		flusher.Flush()
-	} else {
-		// Wait 5 Seconds, Fire.
-		time.Sleep(5 * time.Second)
-	}
-
-	w.Write([]byte("Fire"))
-	err := igniter.Fire(force)
-	if err != nil {
-		w.Write([]byte(err.Error()));
-		return
-	}
-}
-
-
+// swagger:operation GET /scale getScale
+//
+// Returns the scale state.
+//
+// ---
+// produces:
+// - application/json
+// responses:
+//   '200':
+//     description: scale response
+//     schema:
+//       "$ref": "#/definitions/Scale"
 func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		var nscale *pi_launch_control.Scale
@@ -148,7 +64,7 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 			nscale = scale
 		}
 
-		nscale, err := pi_launch_control.NewScale(nscale.Device, nscale.Trigger);
+		nscale, err := pi_launch_control.NewScale(nscale.Device, nscale.TriggerC, nscale.Trigger);
 		if err != nil {
 			fmt.Println("Error updating scale.", err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -159,14 +75,14 @@ func ScaleSettingsControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" || r.Method == "POST" {
-		json.NewEncoder(w).Encode(scale)
+		json.NewEncoder(w).Encode(scale.Read())
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"));
 	}
 }
 
-
+// swagger: operation GET /scale/tare
 func TareScaleControl(w http.ResponseWriter, r *http.Request) {
 	if scale.Initialized && (r.Method == "GET" || r.Method == "POST") {
 		scale.Tare()
@@ -201,61 +117,209 @@ func CalibrateScaleControl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
-func CaptureScaleControl(w http.ResponseWriter, r *http.Request) {
-	if scale.Initialized && scale.Calibrated && r.Method == "GET" {
-		var err error = nil
-
-		multiplier := time.Second
-		dur := int(videoProfile.Timeout.Seconds())
-
-		keys, ok := r.URL.Query()["ms"]
+func RootHandler(w http.ResponseWriter, r *http.Request) {
+	// Push some things if we know what our request is.
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		p, ok := w.(http.Pusher)
 		if ok {
-			dur, err = strconv.Atoi(keys[0])
-			if err == nil {
-				multiplier = time.Millisecond
-			}
+			p.Push("/events", nil)
+			p.Push("/style.css", nil)
+			p.Push("/App.js", nil)
 		}
+	}
 
-		// TODO: Have this return results to a channel, so we can
-		// stream them as JSON to the browser.
-		cap, err := scale.Sample(multiplier * time.Duration(dur))
-		if err == nil {
-			json.NewEncoder(w).Encode(cap)
-			return
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-		}
-	} else if scale.Initialized && scale.Calibrated {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("500 - Method Not Supported"));
+	handler.ServeHTTP(w, r)
+}
+
+func CameraStatusControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		json.NewEncoder(w).Encode(camera)
 	} else {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		w.Write([]byte("Scale not initialized or calibrated."))
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"))
 	}
 }
 
+func ClockControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		keys, ok := r.URL.Query()["tstamp"]
+		if ok {
+			timestamp, err := strconv.ParseUint(keys[0], 10, 64)
+			args := []string{fmt.Sprintf("@%d", timestamp)}
+			_, err = exec.Command("date", args...).Output()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+			} else {
+				w.WriteHeader(http.StatusOK)
+			}
+		}
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("500 - Method Not Supported"))
+	}
+}
 
 func IgniterControl(w http.ResponseWriter, r *http.Request) {
-	var err error = nil
-	if r.Method == "POST" {
-		err = igniter.Fire(false);
-
-		if err != nil {
-			w.WriteHeader(http.StatusExpectationFailed)
-			w.Write([]byte(err.Error() + "\n"))
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-	}
-
-	if r.Method == "GET" || r.Method == "POST" {
+	if r.Method == "GET" {
 		json.NewEncoder(w).Encode(igniter.GetState())
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("500 - Method Not Supported"))
 	}
+}
+
+// Launch / Test Sequence Control.
+func MissionControl(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/mission/start":
+		if mission != nil {
+			if mission.Aborted || mission.Complete {
+				// Make sure we call this from the server side.
+				mission.Abort()
+				mission = nil
+				// So that we can carry on now with a new mission.
+			} else {
+				w.WriteHeader(http.StatusExpectationFailed)
+				w.Write([]byte("417 - Mission Already Underway"))
+				return
+			}
+		}
+
+		// Check to verify Igniter is OK.
+		if !igniter.IsReady() {
+			w.WriteHeader(http.StatusExpectationFailed)
+			w.Write([]byte("417 - Check Igniter Connections."))
+			return
+		}
+
+		mission = pi_launch_control.NewMission(igniter, scale, camera)
+		mission.Start(broker)
+	case "/mission/abort":
+		if mission == nil {
+			w.WriteHeader(http.StatusExpectationFailed)
+			w.Write([]byte("417 - No Mission in Progress"))
+			return
+		}
+
+		mission.Abort()
+		mission = nil
+	case "/mission/download":
+		if r.Method == "GET" {
+			buf := new(bytes.Buffer)
+			filename := ""
+
+			if igniter.GetFirstRecorded() != nil {
+				zw := zip.NewWriter(buf)
+
+				// Create an array / slice of devices to get data from.
+				// If we get an error on doing anything with a device file, we bail.
+				var err error = nil
+
+				devices := make([]map[*zip.FileHeader][]byte, 1)
+
+				total := 0
+				complete := 0
+
+				// Always add the igniter.
+				devices[0] = igniter.GetRecordedData()
+				total += len(devices[0])
+				if scale.Initialized {
+					devices = append(devices, scale.GetRecordedData())
+					total += len(devices[len(devices)-1])
+				}
+				if camera.Initialized {
+					devices = append(devices, camera.GetRecordedData())
+					total += len(devices[len(devices)-1])
+				}
+
+				filename = fmt.Sprintf("%d", igniter.GetFirstRecorded().Timestamp)
+
+				// If we have a name query param, add it.
+				namekeys, ok := r.URL.Query()["name"]
+				if ok {
+					filename = fmt.Sprintf("%s-%s", filename, namekeys[0])
+				}
+
+				// Append the .zip.
+				filename = fmt.Sprintf("%s.zip", filename)
+				// And away we go.
+				for _, data := range devices {
+					if err != nil {
+						break;
+					}
+					//
+					for fname, fdata := range data {
+						f, ferr := zw.CreateHeader(fname)
+						if ferr != nil {
+							err = ferr
+							break
+						}
+						_, ferr = f.Write(fdata)
+						if ferr != nil {
+							err = ferr
+							break
+						}
+						complete++;
+						obj := map[string]interface{}{
+							"Total":    total,
+							"Complete": complete,
+							"Error":    nil,
+						}
+
+						statusdata, err := json.Marshal(obj)
+						if err == nil {
+							s := fmt.Sprintf("event: %s\ndata: %s\n", "MissionPacking", string(statusdata))
+							broker.Outgoing <- s
+						}
+					}
+				}
+
+				// Still no error?
+				if err == nil {
+					err = zw.Close()
+				}
+
+				if err != nil {
+					obj := map[string]interface{}{
+						"Total":    total,
+						"Complete": complete,
+						"Error":    nil,
+					}
+
+					statusdata, err := json.Marshal(obj)
+					if err == nil {
+						s := fmt.Sprintf("event: %s\ndata: %s\n", "MissionPacking", string(statusdata))
+						broker.Outgoing <- s
+					}
+
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(err.Error()))
+					return
+				}
+			}
+
+			if filename == "" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			w.Header().Add("Pragma", "public")
+			w.Header().Add("Expires", "0")
+			w.Header().Add("Cache-Control", "must-revalidate, post-check=0, pre-check=0")
+			w.Header().Add("Cache-Control", "public")
+			w.Header().Add("Content-type", "application/octet-stream")
+			w.Header().Add("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+			w.Header().Add("Content-Transfer-Encoding", "binary")
+			w.Header().Add("Content-Length", fmt.Sprintf("%d", buf.Len()))
+			w.Write(buf.Bytes())
+			return
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("500 - Method Not Supported"))
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func redirectTLS(w http.ResponseWriter, r *http.Request) {
@@ -265,50 +329,97 @@ func redirectTLS(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	var err error = nil
-	if _, err = host.Init(); err != nil {
-		log.Fatal(err)
-	}
 
-	// Initialize the Igniter.
-	igniter = &pi_launch_control.Igniter {
-		TestPin: gpioreg.ByName("GPIO17"),
-		FirePin: gpioreg.ByName("GPIO27"),
-	}
+	// Create a channel for the scale and the camera triggers
+	scaleTrigC := make(chan time.Time, 1)
+	camTrigC   := make(chan time.Time, 1)
+
+	// Setup the SSE Broker for event data.
+	broker = pi_launch_control.NewBroker()
+	broker.Start()
+
+	// Startup sequence here is important.
+	// The periph.io sysfs driver will export every gpio in the system to sysfs (ugh!)
+	// which ends up allocating all those gpios as exported, in-use.
+	// When the scale device tries to open() for the first time, it cannot get the sck and data pins,
+	// as they're already tied up with sysfs exports.
+	// As such, the only way to 'fix' this is to either set those pins as hogs in the device tree (preferred)
+	// or, to initialize the scale first, then the igniter.
+	// Of course, I could just write a kernel driver for the igniter...
 
 	// Initialize the Scale.
 	scaleDevice := "/sys/devices/platform/0.weight"
 	scaleTrigger := "/sys/bus/iio/devices/iio_sysfs_trigger/trigger0"
-	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigger);
+	scale, err = pi_launch_control.NewScale(scaleDevice, scaleTrigC, scaleTrigger);
 	if err != nil {
 		fmt.Println(err)
+		fmt.Println("Scale not Initialized: ", err)
+	} else {
+		scale.AddListener(broker.Outgoing)
+		fmt.Println("Scale Present")
+		defer scale.Close()
 	}
 
-	// Initialize the Camera.
-	cameraProfile.Width = 640
-	cameraProfile.Height = 480
-	cameraProfile.Timeout = 300 * time.Millisecond;
+	// Initialize the Igniter.
+	igniter, err = pi_launch_control.NewIgniter("GPIO17", "GPIO27")
+	if err != nil {
+		fmt.Println(err)
+		fmt.Println("Igniter not Initialized: ", err)
+	} else {
+		igniter.AddListener(broker.Outgoing)
+		fmt.Println("Igniter Initialized")
+	}
 
-	videoProfile.Timeout = 30 * time.Second;
-	videoProfile.Width = 640
-	videoProfile.Height = 480
-	videoProfile.Framerate = 80
-	videoProfile.Args = append(videoProfile.Args, "-ae", "10,0xff,0x808000", "-a", "1548", "-a", "\"%Y-%m-%d %X\"", "-pf", "high", "-ih", "-pts")
+	// Initialize the Camera
+	camera, err = pi_launch_control.NewCamera("/dev/video0", camTrigC)
+	if err != nil {
+		fmt.Println("Camera not Initialized: ", err)
+	} else {
+		camera.AddListener(broker.Outgoing)
+		fmt.Println("Camera Present")
+		defer camera.Close()
+	}
+
+	// Setup the Ticker for triggering scale and image capture.
+	devicePoller := time.NewTicker(12500 * time.Microsecond) // 80hz
+	// Go func to send to both of them when devicePoller ticks
+	go func() {
+		for t := range devicePoller.C {
+			if scale.Initialized {
+				scaleTrigC <- t
+			}
+			if camera.Initialized {
+				camTrigC <- t
+			}
+		}
+	}()
+
+	// Setup no initial Mission
+	mission = nil
 
 	fmt.Println("Setting up HTTP server...")
+
+	handler = http.FileServer(rice.MustFindBox("webroot").HTTPBox())
+	fmt.Println("Found the rice box.")
+
 	// Setup the handlers.
-	http.Handle("/", http.FileServer(rice.MustFindBox("webroot").HTTPBox()))
+	http.HandleFunc("/", RootHandler)
+
+	// Setup the SSE Event Handler. This comes from the 'broker'.
+	http.HandleFunc("/events", broker.ServeHTTP)
 
 	http.HandleFunc("/igniter", IgniterControl)
-	http.HandleFunc("/igniter/countdown", IgniterCountdownControl)
-	http.HandleFunc("/camera", CameraControl)
-	http.HandleFunc("/camera/video", VideoControl)
+
+	http.HandleFunc("/camera", camera.ServeHTTP)
+	http.HandleFunc("/camera/status", CameraStatusControl)
+
+	http.HandleFunc("/clock", ClockControl)
+
 	http.HandleFunc("/scale", ScaleSettingsControl)
 	http.HandleFunc("/scale/tare", TareScaleControl)
 	http.HandleFunc("/scale/calibrate", CalibrateScaleControl)
-	http.HandleFunc("/scale/capture", CaptureScaleControl)
 
-	http.HandleFunc("/testfire", TestControl)
-	http.HandleFunc("/launch", LaunchControl)
+	http.HandleFunc("/mission/", MissionControl)
 
 	cert := flag.String("cert", "/etc/ssl/certs/pi-launch-control.pem", "The certificate for this server.")
 	certkey := flag.String("key", "/etc/ssl/certs/pi-launch-control-key.pem", "The key for the server cert.")
@@ -319,13 +430,13 @@ func main() {
 	_, keyerr := os.Stat(*certkey)
 
 	if certerr == nil && keyerr == nil {
-		log.Println("SSL Configuration set up.")
+		fmt.Println("SSL Configuration set up.")
 		go func() {
 			log.Fatal(http.ListenAndServe(":80", http.HandlerFunc(redirectTLS)));
 		} ()
 		log.Fatal(http.ListenAndServeTLS(":443", *cert, *certkey, nil))
 	} else {
-		log.Println("SSL Configuration not found.")
+		fmt.Println("SSL Configuration not found.")
 		log.Fatal(http.ListenAndServe(":80", nil))
 	}
 }
