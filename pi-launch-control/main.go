@@ -421,8 +421,8 @@ func main() {
 
 	http.HandleFunc("/mission/", MissionControl)
 
-	cert := flag.String("cert", "/etc/ssl/certs/pi-launch-control.pem", "The certificate for this server.")
-	certkey := flag.String("key", "/etc/ssl/certs/pi-launch-control-key.pem", "The key for the server cert.")
+	cert := flag.String("cert", "/etc/ssl/certs/pi-launch-control/cert.pem", "The certificate for this server.")
+	certkey := flag.String("key", "/etc/ssl/certs/pi-launch-control/key.pem", "The key for the server cert.")
 
 	flag.Parse()
 
