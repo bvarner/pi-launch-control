@@ -13,7 +13,7 @@ github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyC
 github.com/valyala/fasttemplate v1.0.1/go.mod h1:UQGH1tvbgY+Nz5t2n7tXsz52dQxojPUpymEIMZ47gx8=
 github.com/zfjagann/golang-ring v0.0.0-20190304061218-d34796e0a6c2 h1:UQwvu7FjUEdVYofx0U6bsc5odNE7wa5TSA0fl559GcA=
 github.com/zfjagann/golang-ring v0.0.0-20190304061218-d34796e0a6c2/go.mod h1:0MsIttMJIF/8Y7x0XjonJP7K99t3sR6bjj4m5S4JmqU=
-golang.org/x/sys v0.0.0-20200413165638-669c56c373c4 h1:opSr2sbRXk5X5/givKrrKj9HXxFpW2sdCiP8MJSKLQY=
-golang.org/x/sys v0.0.0-20200413165638-669c56c373c4/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.1.0 h1:kunALQeHf1/185U1i0GOB/fy1IPRDDpuoOOqRReG57U=
+golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 periph.io/x/periph v3.6.2+incompatible h1:B9vqhYVuhKtr6bXua8N9GeBEvD7yanczCvE0wU2LEqw=
 periph.io/x/periph v3.6.2+incompatible/go.mod h1:EWr+FCIU2dBWz5/wSWeiIUJTriYv9v2j2ENBmgYyy7Y=
